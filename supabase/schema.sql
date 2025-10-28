@@ -18,6 +18,8 @@ create table if not exists notes (
   id uuid primary key default gen_random_uuid(),
   family_space_id uuid not null references family_space(id) on delete cascade,
   content text not null,
+  category text default 'general',
+  tags text[] default '{}',
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamp with time zone default now()
 );
@@ -27,6 +29,7 @@ create table if not exists tasks (
   family_space_id uuid not null references family_space(id) on delete cascade,
   title text not null,
   status text not null default 'todo' check (status in ('todo','doing','done')),
+  priority text not null default 'medium' check (priority in ('low','medium','high')),
   due_date date,
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamp with time zone default now()
@@ -38,7 +41,9 @@ create table if not exists subscriptions (
   name text not null,
   amount_cents integer not null default 0,
   cadence text not null default 'monthly' check (cadence in ('monthly','yearly')),
+  category text default 'entertainment',
   next_renewal_date date,
+  is_active boolean default true,
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamp with time zone default now()
 );
