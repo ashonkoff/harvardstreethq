@@ -6,24 +6,42 @@ export function Subscriptions() {
   const [subs, setSubs] = useState<Subscription[]>([])
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
+  const [spaceId, setSpaceId] = useState<string | null>(null)
+
+  async function loadSpace() {
+    const { data, error } = await supabase.from('my_profile').select('family_space_id').single()
+    if (!error) setSpaceId(data?.family_space_id ?? null)
+  }
 
   async function load() {
     const { data, error } = await supabase
       .from('subscriptions')
       .select('*')
       .order('created_at', { ascending: false })
-    if (error) console.error(error)
-    setSubs(data || [])
+    if (!error) setSubs(data || [])
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    loadSpace()
+    load()
+  }, [])
 
   async function add() {
     if (!name.trim()) return
+    if (!spaceId) await loadSpace()
     const cents = Math.round((parseFloat(amount || '0') || 0) * 100)
-    const { error } = await supabase.from('subscriptions').insert({ name, amount_cents: cents, cadence: 'monthly' })
-    if (error) return console.error(error)
-    setName(''); setAmount('')
+    const { error } = await supabase.from('subscriptions').insert({
+      name,
+      amount_cents: cents,
+      cadence: 'monthly',
+      family_space_id: spaceId,
+    })
+    if (error) {
+      console.error('Insert error', error)
+      return
+    }
+    setName('')
+    setAmount('')
     load()
   }
 
@@ -33,19 +51,29 @@ export function Subscriptions() {
     load()
   }
 
-  function dollars(cents: number){ return `$${(cents/100).toFixed(2)}` }
+  function dollars(cents: number) {
+    return `$${(cents / 100).toFixed(2)}`
+  }
 
   return (
     <div>
       <h2>Subscriptions</h2>
       <div className="row">
-        <input placeholder="Name (e.g., Netflix)" value={name} onChange={e => setName(e.target.value)} />
-        <input placeholder="Amount (e.g., 15.99)" value={amount} onChange={e => setAmount(e.target.value)} />
+        <input
+          placeholder="Name (e.g., Netflix)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <input
+          placeholder="Amount (e.g., 15.99)"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
         <button onClick={add}>Add</button>
       </div>
       <div style={{ height: 10 }} />
       <div className="grid" style={{ gap: 8 }}>
-        {subs.map(s => (
+        {subs.map((s) => (
           <div className="item" key={s.id}>
             <div className="row" style={{ gap: 12 }}>
               <div style={{ fontWeight: 700 }}>{s.name}</div>
