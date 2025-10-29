@@ -23,7 +23,7 @@ export default function App() {
   function renderContent() {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard />
+        return <Dashboard session={session} onNavigate={(tab) => setActiveTab(tab as any)} />
       case 'tasks':
         return <Tasks session={session} />
       case 'notes':
@@ -44,19 +44,31 @@ export default function App() {
       <Header session={session} />
       <RequireAuth session={session}>
         {/* Navigation Tabs */}
-        <div className="card" style={{ marginBottom: 20 }}>
-          <div className="row" style={{ gap: 8 }}>
+        <div className="card compact" style={{ marginBottom: 8, paddingTop: 8, paddingBottom: 8 }}>
+          <div className="row" style={{ gap: 6 }}>
             <button 
               onClick={() => setActiveTab('dashboard')}
-              className={`nav-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
+              className={`nav-tab nav-tab-dashboard ${activeTab === 'dashboard' ? 'active' : ''}`}
             >
-              📊 Dashboard
+              🏠 Dashboard
+            </button>
+            <button 
+              onClick={() => setActiveTab('calendar')}
+              className={`nav-tab ${activeTab === 'calendar' ? 'active' : ''}`}
+            >
+              📅 Calendar
             </button>
             <button 
               onClick={() => setActiveTab('tasks')}
               className={`nav-tab ${activeTab === 'tasks' ? 'active' : ''}`}
             >
-              📋 Tasks
+              📋 To do
+            </button>
+            <button 
+              onClick={() => setActiveTab('mealplan')}
+              className={`nav-tab ${activeTab === 'mealplan' ? 'active' : ''}`}
+            >
+              🍽️ Meal Plan
             </button>
             <button 
               onClick={() => setActiveTab('notes')}
@@ -70,25 +82,17 @@ export default function App() {
             >
               💳 Subscriptions
             </button>
-            <button 
-              onClick={() => setActiveTab('calendar')}
-              className={`nav-tab ${activeTab === 'calendar' ? 'active' : ''}`}
-            >
-              📅 Calendar
-            </button>
-            <button 
-              onClick={() => setActiveTab('mealplan')}
-              className={`nav-tab ${activeTab === 'mealplan' ? 'active' : ''}`}
-            >
-              🍽️ Meal Plan
-            </button>
           </div>
         </div>
 
         {/* Main Content */}
-        <div className="card">
-          {renderContent()}
-        </div>
+        {activeTab === 'dashboard' ? (
+          renderContent()
+        ) : (
+          <div className="card">
+            {renderContent()}
+          </div>
+        )}
       </RequireAuth>
     </div>
   )

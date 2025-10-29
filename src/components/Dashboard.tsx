@@ -1,372 +1,550 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import type { Task, Note, Subscription } from '../types'
-import { format, startOfWeek, endOfWeek, isWithinInterval, parseISO } from 'date-fns'
+import { format, addDays, startOfWeek, endOfWeek, isToday, parseISO } from 'date-fns'
+import type { Session } from '@supabase/supabase-js'
+import type { Note } from '../types'
 
-export function Dashboard() {
-  const [tasks, setTasks] = useState<Task[]>([])
+// Reuse keys/flows used elsewhere
+const MEAL_PLAN_FEED_KEY = 'harvard-street-meal-plan-feed-url'
+
+type GoogleTask = {
+  id: string
+  title: string
+  notes?: string
+  status: 'completed' | 'needsAction'
+  due?: string
+  taskListId: string
+}
+
+type CalendarSummaryEvent = {
+  id: string
+  summary: string
+  start: { dateTime?: string; date?: string }
+  end: { dateTime?: string; date?: string }
+  location?: string
+}
+
+type DashboardProps = {
+  session: Session | null
+  onNavigate: (tab: 'dashboard' | 'tasks' | 'notes' | 'subscriptions' | 'calendar' | 'mealplan') => void
+}
+
+export function Dashboard({ session, onNavigate }: DashboardProps) {
+  // Google Tasks (snapshot)
+  const [tasks, setTasks] = useState<GoogleTask[]>([])
+  const [tasksError, setTasksError] = useState<string | null>(null)
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [isAddingTaskQuick, setIsAddingTaskQuick] = useState(false)
+  const [showAddTask, setShowAddTask] = useState(false)
+
+  // Notes (snapshot)
   const [notes, setNotes] = useState<Note[]>([])
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
-  const [newTask, setNewTask] = useState('')
-  const [newNote, setNewNote] = useState('')
-  const [newSubName, setNewSubName] = useState('')
-  const [newSubAmount, setNewSubAmount] = useState('')
-  const [isAddingTask, setIsAddingTask] = useState(false)
+  const [notesError, setNotesError] = useState<string | null>(null)
+  const [newNoteText, setNewNoteText] = useState('')
   const [isAddingNote, setIsAddingNote] = useState(false)
-  const [isAddingSub, setIsAddingSub] = useState(false)
+  const [showAddNote, setShowAddNote] = useState(false)
+
+  // Compact calendar (3-day) — Family calendar preferred
+  const [calEvents, setCalEvents] = useState<CalendarSummaryEvent[]>([])
+  const [calError, setCalError] = useState<string | null>(null)
+
+  // Meal plan (Mon–Fri row)
+  const [mealEvents, setMealEvents] = useState<Record<string, { type: string; name: string }[]>>({})
+  const [mealError, setMealError] = useState<string | null>(null)
 
   useEffect(() => {
-    loadData()
-  }, [])
+    loadGoogleTasks()
+    loadNotes()
+    loadCompactCalendar()
+    loadMealPlanRow()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session])
 
-  async function loadData() {
-    const [tasksRes, notesRes, subsRes] = await Promise.all([
-      supabase.from('tasks').select('*'),
-      supabase.from('notes').select('*'),
-      supabase.from('subscriptions').select('*')
-    ])
-
-    if (!tasksRes.error) setTasks(tasksRes.data || [])
-    if (!notesRes.error) setNotes(notesRes.data || [])
-    if (!subsRes.error) setSubscriptions(subsRes.data || [])
-  }
-
-  async function addTask() {
-    if (!newTask.trim()) return
-    setIsAddingTask(true)
+  // ---- Notes (snapshot) ----
+  async function loadNotes() {
     try {
-      const { error } = await supabase.from('tasks').insert({ title: newTask })
-      if (!error) {
-        setNewTask('')
-        await loadData()
-      }
-    } finally {
-      setIsAddingTask(false)
+      const { data, error } = await supabase.from('notes').select('*').order('created_at', { ascending: false })
+      if (error) throw error
+      setNotes(data || [])
+      setNotesError(null)
+    } catch (err) {
+      setNotesError(err instanceof Error ? err.message : 'Failed to load notes')
     }
   }
 
-  async function addNote() {
-    if (!newNote.trim()) return
+  async function addNoteQuick() {
+    if (!newNoteText.trim()) return
     setIsAddingNote(true)
     try {
-      const { error } = await supabase.from('notes').insert({ content: newNote })
-      if (!error) {
-        setNewNote('')
-        await loadData()
-      }
+      const { error } = await supabase.from('notes').insert({ content: newNoteText.trim() })
+      if (error) throw error
+      setNewNoteText('')
+      await loadNotes()
+    } catch (err) {
+      setNotesError(err instanceof Error ? err.message : 'Failed to add note')
     } finally {
       setIsAddingNote(false)
     }
   }
 
-  async function addSubscription() {
-    if (!newSubName.trim()) return
-    setIsAddingSub(true)
+  async function deleteNoteQuick(id: string) {
     try {
-      const cents = Math.round((parseFloat(newSubAmount || '0') || 0) * 100)
-      const { error } = await supabase.from('subscriptions').insert({ 
-        name: newSubName, 
-        amount_cents: cents,
-        cadence: 'monthly'
-      })
-      if (!error) {
-        setNewSubName('')
-        setNewSubAmount('')
-        await loadData()
+      const { error } = await supabase.from('notes').delete().eq('id', id)
+      if (error) throw error
+      await loadNotes()
+    } catch (err) {
+      setNotesError(err instanceof Error ? err.message : 'Failed to delete note')
+    }
+  }
+
+  // ---- Google Tasks (compact) ----
+  async function loadGoogleTasks() {
+    try {
+      if (!session) return
+      const { data } = await supabase.auth.getSession()
+      const providerToken = data.session?.provider_token
+      const accessToken = data.session?.access_token
+      if (!providerToken) {
+        setTasksError('Google access not granted. Sign out/in to re‑link.')
+        return
       }
-    } finally {
-      setIsAddingSub(false)
+      const resp = await fetch('/.netlify/functions/google-tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify({ action: 'listTasks', googleAccessToken: providerToken, taskListId: '@default' }),
+      })
+      if (!resp.ok) throw new Error(await resp.text())
+      const json = await resp.json()
+      const all: GoogleTask[] = (json.tasks || []).map((t: any) => ({
+        id: t.id,
+        title: t.title,
+        notes: t.notes,
+        status: t.status,
+        due: t.due,
+        taskListId: '@default',
+      }))
+      const active = all.filter(t => t.status === 'needsAction')
+      const completed = all.filter(t => t.status === 'completed')
+      setTasks([...active, ...completed])
+      setTasksError(null)
+    } catch (err) {
+      setTasksError(err instanceof Error ? err.message : 'Failed to load tasks')
     }
   }
 
-  async function toggleTaskStatus(id: string, status: Task['status']) {
-    const nextStatus = status === 'todo' ? 'doing' : status === 'doing' ? 'done' : 'todo'
-    await supabase.from('tasks').update({ status: nextStatus }).eq('id', id)
-    loadData()
-  }
-
-  async function deleteTask(id: string) {
-    await supabase.from('tasks').delete().eq('id', id)
-    loadData()
-  }
-
-  async function deleteNote(id: string) {
-    await supabase.from('notes').delete().eq('id', id)
-    loadData()
-  }
-
-  async function deleteSubscription(id: string) {
-    await supabase.from('subscriptions').delete().eq('id', id)
-    loadData()
-  }
-
-  // Statistics
-  const todoTasks = tasks.filter(t => t.status === 'todo')
-  const doingTasks = tasks.filter(t => t.status === 'doing')
-  const doneTasks = tasks.filter(t => t.status === 'done')
-  const overdueTasks = tasks.filter(t => {
-    if (!t.due_date) return false
+  async function toggleGoogleTaskStatus(task: GoogleTask) {
     try {
-      return parseISO(t.due_date) < new Date() && t.status !== 'done'
-    } catch {
-      return false
+      if (!session) return
+      const { data } = await supabase.auth.getSession()
+      const providerToken = data.session?.provider_token
+      const accessToken = data.session?.access_token
+      if (!providerToken) return
+      const newStatus = task.status === 'completed' ? 'needsAction' : 'completed'
+      const resp = await fetch('/.netlify/functions/google-tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          action: 'updateTask',
+          googleAccessToken: providerToken,
+          taskListId: task.taskListId,
+          taskId: task.id,
+          taskData: { status: newStatus },
+        }),
+      })
+      if (!resp.ok) throw new Error('Failed to update task')
+      await loadGoogleTasks()
+    } catch (err) {
+      setTasksError(err instanceof Error ? err.message : 'Failed to update task')
     }
-  })
-
-  const activeSubs = subscriptions.filter(s => s.is_active !== false)
-  const monthlyTotal = activeSubs
-    .filter(s => s.cadence === 'monthly')
-    .reduce((sum, s) => sum + s.amount_cents, 0)
-
-  function dollars(cents: number) {
-    return `$${(cents / 100).toFixed(2)}`
   }
 
-  function getStatusIcon(status: Task['status']) {
-    switch (status) {
-      case 'todo': return '⭕'
-      case 'doing': return '🔄'
-      case 'done': return '✅'
-      default: return '⭕'
+  async function deleteGoogleTask(task: GoogleTask) {
+    try {
+      if (!session) return
+      const { data } = await supabase.auth.getSession()
+      const providerToken = data.session?.provider_token
+      const accessToken = data.session?.access_token
+      if (!providerToken) return
+      const resp = await fetch('/.netlify/functions/google-tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          action: 'deleteTask',
+          googleAccessToken: providerToken,
+          taskListId: task.taskListId,
+          taskId: task.id,
+        }),
+      })
+      if (!resp.ok) throw new Error('Failed to delete task')
+      await loadGoogleTasks()
+    } catch (err) {
+      setTasksError(err instanceof Error ? err.message : 'Failed to delete task')
     }
+  }
+
+  async function addGoogleTaskQuick() {
+    if (!newTaskTitle.trim() || !session) return
+    setIsAddingTaskQuick(true)
+    try {
+      const { data } = await supabase.auth.getSession()
+      const providerToken = data.session?.provider_token
+      const accessToken = data.session?.access_token
+      if (!providerToken) throw new Error('Google access not granted')
+
+      const taskData: any = { title: newTaskTitle.trim() }
+      const resp = await fetch('/.netlify/functions/google-tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          action: 'createTask',
+          googleAccessToken: providerToken,
+          taskListId: '@default',
+          taskData,
+        }),
+      })
+      if (!resp.ok) throw new Error(await resp.text())
+      setNewTaskTitle('')
+      await loadGoogleTasks()
+    } catch (err) {
+      setTasksError(err instanceof Error ? err.message : 'Failed to add task')
+    } finally {
+      setIsAddingTaskQuick(false)
+    }
+  }
+
+  // ---- Calendar (3-day, Family pref) ----
+  async function loadCompactCalendar() {
+    try {
+      if (!session) return
+      const { data } = await supabase.auth.getSession()
+      const providerToken = data.session?.provider_token
+      const accessToken = data.session?.access_token
+      if (!providerToken) {
+        setCalError('Google access not granted. Sign out/in to re‑link.')
+        return
+      }
+
+      const listResp = await fetch('/.netlify/functions/calendar-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify({ action: 'listCalendars', googleAccessToken: providerToken })
+      })
+      if (!listResp.ok) throw new Error(await listResp.text())
+      const listJson = await listResp.json()
+      const calendars: { id: string; summary: string; primary?: boolean }[] = listJson.calendars || []
+      const family = calendars.find(c => (c.summary || '').toLowerCase().includes('family'))
+      const selectedId = family?.id || calendars.find(c => c.primary)?.id || calendars[0]?.id
+      if (!selectedId) { setCalEvents([]); return }
+
+      const now = new Date()
+      const end = addDays(now, 3)
+      const eventsResp = await fetch('/.netlify/functions/calendar-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          action: 'listEvents',
+          googleAccessToken: providerToken,
+          timeMin: now.toISOString(),
+          timeMax: end.toISOString(),
+          calendarIds: [selectedId],
+        })
+      })
+      if (!eventsResp.ok) throw new Error(await eventsResp.text())
+      const evJson = await eventsResp.json()
+      setCalEvents((evJson.events || []) as CalendarSummaryEvent[])
+      setCalError(null)
+    } catch (err) {
+      setCalError(err instanceof Error ? err.message : 'Failed to load calendar')
+    }
+  }
+
+  const eventsByDay = useMemo(() => {
+    const map: Record<string, CalendarSummaryEvent[]> = {}
+    for (const ev of calEvents) {
+      const start = ev.start.dateTime || ev.start.date
+      if (!start) continue
+      const d = format(parseISO(start), 'yyyy-MM-dd')
+      if (!map[d]) map[d] = []
+      map[d].push(ev)
+    }
+    return map
+  }, [calEvents])
+
+  function formatCompactTime(ev: CalendarSummaryEvent) {
+    const isAllDay = !!(ev.start.date && ev.end?.date)
+    if (isAllDay) return 'All day'
+    try {
+      const s = ev.start.dateTime ? parseISO(ev.start.dateTime) : (ev.start.date ? parseISO(ev.start.date) : null)
+      const e = ev.end?.dateTime ? parseISO(ev.end.dateTime) : (ev.end?.date ? parseISO(ev.end.date) : null)
+      if (!s && !e) return ''
+      const fmt = (d: Date) => format(d, 'h:mm a')
+      if (s && e) return `${fmt(s)}–${fmt(e)}`
+      if (s) return fmt(s)
+      if (e) return fmt(e)
+      return ''
+    } catch {
+      return ''
+    }
+  }
+
+  function eventChipStyle(ev: CalendarSummaryEvent): React.CSSProperties {
+    const isAllDay = !!(ev.start.date && ev.end?.date)
+    return {
+      background: isAllDay ? 'linear-gradient(135deg, #4a90e226 0%, #4a90e213 100%)' : 'var(--bg-secondary)',
+      border: isAllDay ? 'none' : '1px solid var(--border)',
+      color: 'var(--ink)',
+      borderRadius: 10,
+      padding: '6px 8px',
+      display: 'block',
+      marginBottom: 4,
+      lineHeight: 1.25,
+      whiteSpace: 'normal',
+      wordBreak: 'break-word',
+    }
+  }
+
+  // ---- Meal Plan (Mon–Fri row) ----
+  async function loadMealPlanRow() {
+    try {
+      const feedUrl = localStorage.getItem(MEAL_PLAN_FEED_KEY) || ''
+      if (!feedUrl) return
+      const start = startOfWeek(new Date(), { weekStartsOn: 1 })
+      const end = endOfWeek(new Date(), { weekStartsOn: 1 })
+      const resp = await fetch('/.netlify/functions/ical-feed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedUrl, timeMin: start.toISOString(), timeMax: end.toISOString() })
+      })
+      if (!resp.ok) throw new Error(await resp.text())
+      const json = await resp.json()
+      const byDay: Record<string, { type: string; name: string }[]> = {}
+      for (const e of (json.events || [])) {
+        const startStr = e.start.dateTime || e.start.date
+        if (!startStr) continue
+        const dKey = format(parseISO(startStr), 'yyyy-MM-dd')
+        const parsed = parseMeal(e.summary || '', e.description || '')
+        if (!byDay[dKey]) byDay[dKey] = []
+        byDay[dKey].push({ type: parsed.type, name: parsed.name })
+      }
+      setMealEvents(byDay)
+      setMealError(null)
+    } catch (err) {
+      setMealError(err instanceof Error ? err.message : 'Failed to load meal plan')
+    }
+  }
+
+  function parseMeal(summary: string, description: string) {
+    const m = summary.match(/(Breakfast|Lunch|Dinner|Brunch|Snack):?\s*(.+)/i)
+    if (m) return { type: m[1], name: (m[2] || '').trim(), description }
+    return { type: 'Meal', name: summary || 'Untitled', description }
+  }
+
+  const threeDays = useMemo(() => {
+    const days: Date[] = []
+    const start = new Date()
+    for (let i = 0; i < 3; i++) days.push(addDays(start, i))
+    return days
+  }, [])
+
+  function taskIcon(status: GoogleTask['status']) {
+    return status === 'completed' ? '✅' : '⭕'
   }
 
   return (
     <div>
-      <h2>Harvard Street Hub - Overview</h2>
-      
-      {/* Quick Stats Row */}
-      <div className="grid grid-3" style={{ marginBottom: 32 }}>
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--ink)' }}>📋 Tasks</h3>
-            <div className="row" style={{ gap: 8 }}>
-              <span className="tag" style={{ background: 'var(--danger)', color: 'white' }}>{todoTasks.length}</span>
-              <span className="tag" style={{ background: 'var(--warn)', color: 'white' }}>{doingTasks.length}</span>
-              <span className="tag" style={{ background: 'var(--ok)', color: 'white' }}>{doneTasks.length}</span>
+      <div className="surface" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.1fr', gap: 16, marginLeft: 'auto', marginRight: 'auto', width: '100%' }}>
+        {/* Left column: Calendar (3-day) + Meal Plan (Mon–Fri single row) */}
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div className="card" style={{ padding: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>📅 Next 3 Days</h3>
+              <button className="filter-btn" onClick={() => onNavigate('calendar')}>See full calendar →</button>
             </div>
+            {calError ? (
+              <div className="small" style={{ color: 'var(--danger)' }}>{calError}</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 230px)', gap: 8, overflowX: 'auto' }}>
+                {threeDays.map(day => {
+                  const key = format(day, 'yyyy-MM-dd')
+                  const dayEvents = (eventsByDay[key] || []).sort((a, b) => {
+                    const as = a.start.dateTime || a.start.date || ''
+                    const bs = b.start.dateTime || b.start.date || ''
+                    return as.localeCompare(bs)
+                  })
+                  const todayFlag = isToday(day)
+                  return (
+                    <div key={key} style={{ width: 230, border: 1 + 'px solid var(--border)', borderRadius: 12, padding: 10, background: 'var(--bg-secondary)' }}>
+                      <div style={{ fontWeight: 700, color: todayFlag ? 'var(--accent)' : 'var(--ink)', marginBottom: 4 }}>
+                        {format(day, 'EEE, MMM d')}{todayFlag ? ' (Today)' : ''}
           </div>
-          {overdueTasks.length > 0 && (
-            <div style={{ color: 'var(--danger)', fontSize: '12px', fontWeight: 500 }}>
-              ⚠️ {overdueTasks.length} overdue
-            </div>
-          )}
+                      <div>
+                        {dayEvents.length === 0 && (
+                          <div className="small" style={{ color: 'var(--muted)', fontStyle: 'italic' }}>No events</div>
+                        )}
+                        {dayEvents.map(ev => (
+                          <div key={ev.id} style={eventChipStyle(ev)}>
+                            <span className="small" style={{ opacity: 0.98, color: 'var(--ink)', marginRight: 6 }}>{formatCompactTime(ev)}</span>
+                            <span className="small" style={{ opacity: 1, color: 'var(--ink)' }}>{ev.summary}</span>
         </div>
-
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--ink)' }}>📝 Notes</h3>
-            <span className="tag" style={{ background: 'var(--accent)', color: 'white' }}>{notes.length}</span>
-          </div>
-          <div style={{ color: 'var(--muted)', fontSize: '12px' }}>
-            {new Set(notes.map(n => n.category || 'general')).size} categories
+                        ))}
           </div>
         </div>
-
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--ink)' }}>💳 Subscriptions</h3>
-            <span className="tag" style={{ background: 'var(--ok)', color: 'white' }}>{activeSubs.length}</span>
+                  )
+                })}
           </div>
-          <div style={{ color: 'var(--accent)', fontSize: '16px', fontWeight: 600 }}>
-            {dollars(monthlyTotal)}/month
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content Grid */}
-      <div className="grid grid-3" style={{ gap: 20 }}>
-        
-        {/* Tasks Column */}
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--ink)' }}>📋 Tasks</h3>
-            <span className="small">{tasks.length} total</span>
+            )}
           </div>
           
-          {/* Add Task */}
-          <div className="row" style={{ marginBottom: 20 }}>
-            <input
-              placeholder="New task..."
-              value={newTask}
-              onChange={(e) => setNewTask(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <button 
-              onClick={addTask}
-              disabled={isAddingTask || !newTask.trim()}
-              style={{ fontSize: '12px', padding: '10px 16px' }}
-            >
-              {isAddingTask ? 'Adding...' : 'Add'}
-            </button>
+          <div className="card" style={{ padding: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>🍽️ Meal Plan (Mon–Fri)</h3>
+              <button className="filter-btn" onClick={() => onNavigate('mealplan')}>Open meal plan →</button>
           </div>
-
-          {/* Tasks List */}
-          <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
-            {tasks.slice(0, 8).map((task) => (
-              <div key={task.id} className="item" style={{ marginBottom: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
-                  <button
-                    onClick={() => toggleTaskStatus(task.id, task.status)}
-                    style={{ background: 'none', border: 'none', fontSize: '18px', padding: 0, cursor: 'pointer' }}
-                  >
-                    {getStatusIcon(task.status)}
-                  </button>
-                  <span style={{ 
-                    fontSize: '14px',
-                    textDecoration: task.status === 'done' ? 'line-through' : 'none',
-                    opacity: task.status === 'done' ? 0.6 : 1,
-                    color: 'var(--ink)'
-                  }}>
-                    {task.title}
-                  </span>
-                </div>
-                <button 
-                  onClick={() => deleteTask(task.id)}
-                  className="delete-btn"
-                  style={{ fontSize: '12px', padding: '6px 10px' }}
-                >
-                  ×
-                </button>
+            {mealError ? (
+              <div className="small" style={{ color: 'var(--danger)' }}>{mealError}</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+                {Array.from({ length: 5 }).map((_, i) => {
+                  const d = addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), i)
+                  const key = format(d, 'yyyy-MM-dd')
+                  const items = mealEvents[key] || []
+                  return (
+                    <div key={key} style={{ border: 1 + 'px solid var(--border)', borderRadius: 12, padding: 10, background: 'var(--bg-secondary)' }}>
+                      <div style={{ fontWeight: 700 }}>{format(d, 'EEE')}</div>
+                      <div style={{ marginTop: 6 }}>
+                        {items.length === 0 && (
+                          <div className="small" style={{ color: 'var(--muted)', fontStyle: 'italic' }}>No meals</div>
+                        )}
+                        {items.slice(0, 2).map((m, idx) => (
+                          <div key={idx} className="small" style={{ marginBottom: 4, color: 'var(--ink)' }}>
+                            <span style={{ opacity: 0.95, color: 'var(--ink)' }}>{m.type}:</span> {m.name}
               </div>
             ))}
-            {tasks.length === 0 && (
-              <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '40px 20px' }}>
-                No tasks yet
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
         </div>
 
-        {/* Notes Column */}
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h3 style={{ margin: 0 }}>📝 Notes</h3>
-            <span className="small">{notes.length} total</span>
+        {/* Right column: To do (Google Tasks) + Notes */}
+        <div style={{ display: 'grid', gap: 12, alignSelf: 'start' }}>
+          <div className="card" style={{ padding: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>📋 To do</h3>
+              <div className="row" style={{ gap: 8 }}>
+                <button className="filter-btn" onClick={() => setShowAddTask(s => !s)}>{showAddTask ? '×' : '＋'}</button>
+                <button className="filter-btn" onClick={() => onNavigate('tasks')}>Open To do →</button>
+              </div>
           </div>
-          
-          {/* Add Note */}
-          <div className="row" style={{ marginBottom: 16 }}>
+            {tasksError ? (
+              <div className="small" style={{ color: 'var(--danger)' }}>{tasksError}</div>
+            ) : (
+              <>
+                {showAddTask && (
+                  <div className="row" style={{ marginBottom: 8 }}>
             <input
-              placeholder="New note..."
-              value={newNote}
-              onChange={(e) => setNewNote(e.target.value)}
+                      placeholder="New task…"
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && !isAddingTaskQuick && newTaskTitle.trim() && addGoogleTaskQuick()}
               style={{ flex: 1 }}
             />
             <button 
-              onClick={addNote}
-              disabled={isAddingNote || !newNote.trim()}
-              style={{ fontSize: '12px', padding: '8px 12px' }}
-            >
-              {isAddingNote ? 'Adding...' : 'Add'}
+                      onClick={addGoogleTaskQuick}
+                      disabled={isAddingTaskQuick || !newTaskTitle.trim()}
+                      className="filter-btn"
+                      style={{ padding: '8px 12px' }}
+                    >
+                      {isAddingTaskQuick ? 'Adding…' : 'Add'}
             </button>
-          </div>
-
-          {/* Notes List */}
-          <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-            {notes.slice(0, 6).map((note) => (
-              <div key={note.id} className="item" style={{ marginBottom: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '14px', marginBottom: 4 }}>
-                    {note.content.length > 50 ? note.content.substring(0, 50) + '...' : note.content}
                   </div>
-                  <div className="small">
-                    {format(new Date(note.created_at), 'MMM d, h:mm a')}
+                )}
+              <div style={{ display: 'grid', gap: 6 }}>
+                {tasks.length === 0 && (
+                  <div className="small" style={{ color: 'var(--muted)' }}>No tasks</div>
+                )}
+                {tasks.map(t => (
+                <div key={t.id} className="item" style={{ padding: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+                    <input 
+                      type="checkbox" 
+                      checked={t.status === 'completed'} 
+                      onChange={() => toggleGoogleTaskStatus(t)}
+                      style={{ width: 16, height: 16, cursor: 'pointer' }}
+                    />
+                    <div style={{ fontSize: 14, color: 'var(--ink)', textDecoration: t.status === 'completed' ? 'line-through' : 'none', opacity: t.status === 'completed' ? 0.6 : 1 }}>{t.title}</div>
                   </div>
-                </div>
-                <button 
-                  onClick={() => deleteNote(note.id)}
-                  className="delete-btn"
-                  style={{ fontSize: '10px', padding: '2px 6px' }}
-                >
-                  ×
-                </button>
+                  <button className="icon-btn icon-btn-light" style={{ padding: '4px 8px', fontSize: 12 }} onClick={() => deleteGoogleTask(t)}>×</button>
               </div>
             ))}
-            {notes.length === 0 && (
-              <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>
-                No notes yet
               </div>
+              </>
             )}
           </div>
-        </div>
 
-        {/* Subscriptions Column */}
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h3 style={{ margin: 0 }}>💳 Subscriptions</h3>
-            <span className="small">{subscriptions.length} total</span>
+          <div className="card" style={{ padding: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>📝 Notes</h3>
+              <div className="row" style={{ gap: 8 }}>
+                <button className="filter-btn" onClick={() => setShowAddNote(s => !s)}>{showAddNote ? '×' : '＋'}</button>
+                <button className="filter-btn" onClick={() => onNavigate('notes')}>Open Notes →</button>
+        </div>
           </div>
-          
-          {/* Add Subscription */}
-          <div style={{ marginBottom: 16 }}>
+            {notesError ? (
+              <div className="small" style={{ color: 'var(--danger)' }}>{notesError}</div>
+            ) : (
+              <>
+                {showAddNote && (
             <div className="row" style={{ marginBottom: 8 }}>
               <input
-                placeholder="Service name..."
-                value={newSubName}
-                onChange={(e) => setNewSubName(e.target.value)}
+                      placeholder="New note…"
+                      value={newNoteText}
+                      onChange={(e) => setNewNoteText(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && !isAddingNote && newNoteText.trim() && addNoteQuick()}
                 style={{ flex: 1 }}
               />
-              <input
-                placeholder="Amount"
-                value={newSubAmount}
-                onChange={(e) => setNewSubAmount(e.target.value)}
-                style={{ width: '80px' }}
-              />
-            </div>
             <button 
-              onClick={addSubscription}
-              disabled={isAddingSub || !newSubName.trim()}
-              style={{ fontSize: '12px', padding: '8px 12px', width: '100%' }}
-            >
-              {isAddingSub ? 'Adding...' : 'Add Subscription'}
+                      onClick={addNoteQuick}
+                      disabled={isAddingNote || !newNoteText.trim()}
+                      className="filter-btn"
+                      style={{ padding: '8px 12px' }}
+                    >
+                      {isAddingNote ? 'Adding…' : 'Add'}
             </button>
-          </div>
-
-          {/* Subscriptions List */}
-          <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-            {subscriptions.slice(0, 6).map((sub) => (
-              <div key={sub.id} className="item" style={{ marginBottom: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: 2 }}>
-                    {sub.name}
                   </div>
-                  <div className="row" style={{ gap: 8 }}>
-                    <span className="tag" style={{ fontSize: '10px' }}>
-                      {dollars(sub.amount_cents)}
-                    </span>
-                    <span className="tag" style={{ fontSize: '10px' }}>
-                      {sub.cadence}
-                    </span>
+                )}
+                <div style={{ display: 'grid', gap: 6 }}>
+                  {notes.length === 0 && (
+                    <div className="small" style={{ color: 'var(--muted)' }}>No notes</div>
+                  )}
+                  {notes.map(n => (
+                    <div key={n.id} className="item note-sticky" style={{ padding: 10 }}>
+                      <button className="icon-btn note-close" onClick={() => deleteNoteQuick(n.id)}>×</button>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14 }}>
+                          {n.content}
+                        </div>
+                        <div className="small" style={{ marginTop: 4 }}>
+                          {format(new Date(n.created_at), 'MMM d, h:mm a')}
                   </div>
                 </div>
-                <button 
-                  onClick={() => deleteSubscription(sub.id)}
-                  className="delete-btn"
-                  style={{ fontSize: '10px', padding: '2px 6px' }}
-                >
-                  ×
-                </button>
               </div>
             ))}
-            {subscriptions.length === 0 && (
-              <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>
-                No subscriptions yet
               </div>
+              </>
             )}
           </div>
         </div>
-      </div>
-
-      {/* Calendar Placeholder */}
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3 style={{ margin: '0 0 16px' }}>📅 Calendar (Coming Soon)</h3>
-        <p className="small">
-          This section will show a private Google Calendar view using your authenticated Google account.
-          The current app already has Google OAuth via Supabase;
-          the next step is adding a small Netlify server function to call Google Calendar API with your user's token.
-        </p>
       </div>
     </div>
   )
 }
+
+
+
+
+
+
