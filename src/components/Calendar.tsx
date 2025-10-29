@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { format, startOfWeek, endOfWeek, isToday, isTomorrow, parseISO, addDays } from 'date-fns'
+import { format, startOfWeek, endOfWeek, isToday, isTomorrow, parseISO, addDays, addWeeks, subWeeks } from 'date-fns'
 import { Session } from '@supabase/supabase-js'
 
 export interface CalendarEvent {
@@ -17,7 +17,7 @@ export interface CalendarEvent {
   description?: string
   location?: string
   calendarId: string
-  calendarName: string
+  calendarName?: string
 }
 
 export function Calendar({ session }: { session: Session | null }) {
@@ -25,6 +25,8 @@ export function Calendar({ session }: { session: Session | null }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState(new Date())
+  const [calendars, setCalendars] = useState<{ id: string, summary: string, primary?: boolean }[]>([])
+  const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([])
 
   useEffect(() => {
     loadCalendarEvents()
@@ -41,13 +43,61 @@ export function Calendar({ session }: { session: Session | null }) {
     setError(null)
     
     try {
-      // Get the current week's date range
-      const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 }) // Monday
-      const weekEnd = endOfWeek(selectedDate, { weekStartsOn: 1 }) // Sunday
-      
-      // For now, let's use a simpler approach with Google Calendar embed
-      // This will work immediately without additional OAuth setup
-      setEvents([]) // We'll show the embed instead
+      const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 })
+      const weekEnd = endOfWeek(selectedDate, { weekStartsOn: 1 })
+
+      // Get Supabase session to extract Google provider token
+      const { data } = await supabase.auth.getSession()
+      const providerToken = data.session?.provider_token
+      const accessToken = data.session?.access_token
+      if (!providerToken) {
+        setError('Google access not granted. Please sign out and sign in again.')
+        setLoading(false)
+        return
+      }
+
+      // Ensure calendars are loaded once (or when empty)
+      if (calendars.length === 0) {
+        const listResp = await fetch('/.netlify/functions/calendar-events', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ action: 'listCalendars', googleAccessToken: providerToken })
+        })
+        if (!listResp.ok) {
+          throw new Error('Failed to load calendar list')
+        }
+        const listJson = await listResp.json()
+        const list = (listJson.calendars || []) as { id: string, summary: string, primary?: boolean }[]
+        setCalendars(list)
+        if (selectedCalendarIds.length === 0 && list.length > 0) {
+          const primary = list.find(c => c.primary)
+          setSelectedCalendarIds([primary?.id || list[0].id])
+        }
+      }
+
+      const resp = await fetch('/.netlify/functions/calendar-events', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          action: 'listEvents',
+          googleAccessToken: providerToken,
+          timeMin: weekStart.toISOString(),
+          timeMax: weekEnd.toISOString(),
+          calendarIds: selectedCalendarIds,
+        })
+      })
+      if (!resp.ok) {
+        if (resp.status === 401) throw new Error('Google Calendar access expired. Please re-authenticate.')
+        throw new Error('Failed to fetch calendar events')
+      }
+      const json = await resp.json()
+      setEvents(json.events || [])
       setLoading(false)
       
     } catch (err) {
@@ -160,99 +210,72 @@ export function Calendar({ session }: { session: Session | null }) {
     <div>
       <h2>📅 Calendar</h2>
       
-      {/* Calendar Options */}
+      {/* Controls: Week navigation + calendar selection */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: '18px' }}>Google Calendar Integration</h3>
-            <div className="small" style={{ marginTop: 4 }}>
-              Choose how you'd like to view your calendar
-            </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="filter-btn" onClick={() => setSelectedDate(d => subWeeks(d, 1))}>← Prev</button>
+            <div className="tag">Week of {format(weekStart, 'MMM d, yyyy')}</div>
+            <button className="filter-btn" onClick={() => setSelectedDate(d => addWeeks(d, 1))}>Next →</button>
+            <button className="filter-btn" onClick={() => setSelectedDate(new Date())}>Today</button>
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            {calendars.map(c => {
+              const checked = selectedCalendarIds.includes(c.id)
+              return (
+                <label key={c.id} className="tag" style={{ cursor: 'pointer' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={checked} 
+                    onChange={(e) => {
+                      setSelectedCalendarIds(prev => e.target.checked ? [...new Set([...prev, c.id])] : prev.filter(id => id !== c.id))
+                    }}
+                    style={{ marginRight: 8 }}
+                  />
+                  {c.summary || c.id}{c.primary ? ' (primary)' : ''}
+                </label>
+              )
+            })}
           </div>
         </div>
       </div>
 
-      {/* Calendar Embed */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ margin: '0 0 16px' }}>📅 Your Google Calendar</h3>
-        <div style={{ 
-          background: 'var(--bg-secondary)', 
-          borderRadius: '12px', 
-          padding: '20px',
-          textAlign: 'center',
-          border: '2px dashed var(--border)'
-        }}>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: '48px', marginBottom: 8 }}>📅</div>
-            <h4 style={{ margin: '0 0 8px', color: 'var(--ink)' }}>Google Calendar Embed</h4>
-            <p className="small" style={{ margin: '0 0 16px' }}>
-              To embed your Google Calendar, you'll need to:
-            </p>
-          </div>
-          
-          <div style={{ textAlign: 'left', maxWidth: '400px', margin: '0 auto' }}>
-            <div style={{ marginBottom: 12 }}>
-              <strong>1.</strong> Go to <a href="https://calendar.google.com" target="_blank" rel="noopener noreferrer">Google Calendar</a>
+      {/* Week view */}
+      <div className="grid grid-3" style={{ gap: 20 }}>
+        {weekDays.map(day => {
+          const key = format(day, 'yyyy-MM-dd')
+          const dayEvents = (eventsByDay[key] || []).sort((a, b) => {
+            const as = a.start.dateTime || a.start.date || ''
+            const bs = b.start.dateTime || b.start.date || ''
+            return as.localeCompare(bs)
+          })
+          const isTodayFlag = isToday(day)
+          return (
+            <div key={key} className="card" style={{ borderColor: isTodayFlag ? 'var(--accent)' : 'var(--border)' }}>
+              <h3 style={{ margin: 0 }}>{format(day, 'EEE, MMM d')}{isTodayFlag ? ' (Today)' : ''}</h3>
+              <div style={{ marginTop: 12 }}>
+                {dayEvents.length === 0 && (
+                  <div className="small" style={{ color: 'var(--muted)' }}>No events</div>
+                )}
+                {dayEvents.map(ev => (
+                  <div key={ev.id} className="item" style={{ marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600 }}>{ev.summary}</div>
+                      <div className="small">
+                        {getEventTimeRange(ev)}
+                        {ev.location ? ` • ${ev.location}` : ''}
+                      </div>
+                    </div>
+                    <span className="tag" style={{ fontSize: '10px' }}>{ev.calendarId}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div style={{ marginBottom: 12 }}>
-              <strong>2.</strong> Click the ⚙️ settings → "Settings and sharing"
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <strong>3.</strong> Scroll down to "Integrate calendar"
-            </div>
-            <div style={{ marginBottom: 16 }}>
-              <strong>4.</strong> Copy the "Public URL to this calendar"
-            </div>
-          </div>
-          
-          <div style={{ marginTop: 20 }}>
-            <input
-              placeholder="Paste your Google Calendar public URL here..."
-              style={{ 
-                width: '100%', 
-                maxWidth: '500px',
-                marginBottom: '12px'
-              }}
-            />
-            <button className="filter-btn" style={{ marginLeft: '8px' }}>
-              Embed Calendar
-            </button>
-          </div>
-        </div>
+          )
+        })}
       </div>
 
-      {/* Alternative: Manual Calendar Entry */}
-      <div className="card">
-        <h3 style={{ margin: '0 0 16px' }}>📝 Quick Calendar Entry</h3>
-        <p className="small" style={{ marginBottom: 16 }}>
-          Add upcoming events directly to your Harvard Street Hub
-        </p>
-        
-        <div className="row" style={{ marginBottom: 12 }}>
-          <input
-            placeholder="Event title..."
-            style={{ flex: 1 }}
-          />
-          <input
-            type="date"
-            style={{ width: '140px' }}
-          />
-          <input
-            type="time"
-            style={{ width: '100px' }}
-          />
-        </div>
-        
-        <div className="row">
-          <input
-            placeholder="Location (optional)..."
-            style={{ flex: 1 }}
-          />
-          <button className="filter-btn">
-            Add Event
-          </button>
-        </div>
-      </div>
+      {/* Note: Team sites calendars can be added if they are subscribed to in Google; they'll appear in the list above. */}
     </div>
   )
 }
