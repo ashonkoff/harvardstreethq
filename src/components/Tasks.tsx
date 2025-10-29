@@ -312,7 +312,7 @@ export function Tasks({ session }: { session: Session | null }) {
   if (loading && tasks.length === 0) {
     return (
       <div>
-        <h2>Tasks</h2>
+        <h2>To do</h2>
         <div className="card">
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--muted)' }}>
             Loading tasks...
@@ -325,7 +325,7 @@ export function Tasks({ session }: { session: Session | null }) {
   if (error && tasks.length === 0) {
     return (
       <div>
-        <h2>Tasks</h2>
+        <h2>To do</h2>
         <div className="card">
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--danger)' }}>
             <div style={{ marginBottom: 16 }}>⚠️ {error}</div>
@@ -340,7 +340,7 @@ export function Tasks({ session }: { session: Session | null }) {
 
   return (
     <div>
-      <h2>📋 Tasks</h2>
+      <h2>📋 To do</h2>
       
       {/* Task Stats */}
       <div className="row" style={{ marginBottom: 16, gap: 12 }}>

@@ -4,11 +4,10 @@ import { SignIn } from './SignIn'
 
 export function Header({ session }: { session: Session | null }) {
   return (
-    <div className="card" style={{ marginBottom: 20 }}>
+    <div className="card compact" style={{ marginBottom: 8 }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1>Harvard Street Hub</h1>
-          <div className="small">Secure home for notes • tasks • subscriptions • calendar</div>
         </div>
         <div>
           {session ? (
