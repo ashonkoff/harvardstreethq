@@ -3,6 +3,10 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error('Missing environment variables:', { hasUrl: !!supabaseUrl, hasKey: !!supabaseServiceKey })
+}
+
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 export const handler = async (event, context) => {
@@ -82,13 +86,20 @@ export const handler = async (event, context) => {
       })
       if (!resp.ok) {
         const errorText = await resp.text()
-        console.error('Google CalendarList error:', errorText)
+        console.error('Google CalendarList error:', resp.status, errorText)
+        let errorMsg = 'Failed to fetch calendar list'
+        try {
+          const errorJson = JSON.parse(errorText)
+          errorMsg = errorJson.error?.message || errorJson.error || errorMsg
+        } catch {
+          errorMsg = errorText || errorMsg
+        }
         return {
           statusCode: resp.status,
           headers: {
             'Access-Control-Allow-Origin': '*',
           },
-          body: JSON.stringify({ error: 'Failed to fetch calendar list' }),
+          body: JSON.stringify({ error: errorMsg, details: errorText }),
         }
       }
       const data = await resp.json()
