@@ -33,7 +33,7 @@ export default function App() {
             case 'calendar':
               return <Calendar session={session} />
       case 'mealplan':
-        return <MealPlan session={session} />
+        return <MealPlan />
       default:
         return <Dashboard />
     }
