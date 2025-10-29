@@ -51,13 +51,6 @@ export function Calendar({ session }: { session: Session | null }) {
       const providerToken = data.session?.provider_token
       const accessToken = data.session?.access_token
       
-      console.log('Session debug:', {
-        hasProviderToken: !!providerToken,
-        providerTokenLength: providerToken?.length,
-        hasAccessToken: !!accessToken,
-        sessionKeys: data.session ? Object.keys(data.session) : []
-      })
-      
       if (!providerToken) {
         setError('Google access token not found. Please sign out and sign in again to grant calendar permissions.')
         setLoading(false)
