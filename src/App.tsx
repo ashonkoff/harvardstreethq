@@ -8,10 +8,11 @@ import { Notes } from './components/Notes'
 import { Tasks } from './components/Tasks'
 import { Subscriptions } from './components/Subscriptions'
 import { Calendar } from './components/Calendar'
+import { MealPlan } from './components/MealPlan'
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notes' | 'subscriptions' | 'calendar'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notes' | 'subscriptions' | 'calendar' | 'mealplan'>('dashboard')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
@@ -31,6 +32,8 @@ export default function App() {
         return <Subscriptions />
             case 'calendar':
               return <Calendar session={session} />
+      case 'mealplan':
+        return <MealPlan session={session} />
       default:
         return <Dashboard />
     }
@@ -72,6 +75,12 @@ export default function App() {
               className={`nav-tab ${activeTab === 'calendar' ? 'active' : ''}`}
             >
               📅 Calendar
+            </button>
+            <button 
+              onClick={() => setActiveTab('mealplan')}
+              className={`nav-tab ${activeTab === 'mealplan' ? 'active' : ''}`}
+            >
+              🍽️ Meal Plan
             </button>
           </div>
         </div>
