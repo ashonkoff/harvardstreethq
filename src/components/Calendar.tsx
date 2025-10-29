@@ -67,7 +67,16 @@ export function Calendar({ session }: { session: Session | null }) {
           body: JSON.stringify({ action: 'listCalendars', googleAccessToken: providerToken })
         })
         if (!listResp.ok) {
-          throw new Error('Failed to load calendar list')
+          const errorText = await listResp.text()
+          console.error('Calendar list error:', errorText)
+          let errorMsg = 'Failed to load calendar list'
+          try {
+            const errorJson = JSON.parse(errorText)
+            errorMsg = errorJson.error || errorMsg
+          } catch {
+            errorMsg = errorText || errorMsg
+          }
+          throw new Error(`${errorMsg} (Status: ${listResp.status})`)
         }
         const listJson = await listResp.json()
         const list = (listJson.calendars || []) as { id: string, summary: string, primary?: boolean }[]
@@ -94,7 +103,16 @@ export function Calendar({ session }: { session: Session | null }) {
       })
       if (!resp.ok) {
         if (resp.status === 401) throw new Error('Google Calendar access expired. Please re-authenticate.')
-        throw new Error('Failed to fetch calendar events')
+        const errorText = await resp.text()
+        console.error('Calendar events error:', errorText)
+        let errorMsg = 'Failed to fetch calendar events'
+        try {
+          const errorJson = JSON.parse(errorText)
+          errorMsg = errorJson.error || errorMsg
+        } catch {
+          errorMsg = errorText || errorMsg
+        }
+        throw new Error(`${errorMsg} (Status: ${resp.status})`)
       }
       const json = await resp.json()
       setEvents(json.events || [])
