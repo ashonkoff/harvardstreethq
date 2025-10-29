@@ -33,11 +33,35 @@ This will:
 - Enforce RLS so only members see/edit their family data
 
 ## 3) Develop locally
+
+### Quick test (frontend only):
 ```bash
 npm install
 npm run dev
 ```
 Open http://localhost:5173
+
+### Full local testing (with Netlify functions):
+**Recommended to test everything before deploying!**
+
+1. Create `.env.local` file with these variables:
+   ```bash
+   VITE_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+   VITE_SUPABASE_ANON_KEY=your_anon_key
+   SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+   ```
+
+2. Run:
+   ```bash
+   npm install
+   npm run dev:full
+   ```
+   Opens http://localhost:8888 with full Netlify functions support
+
+   This lets you test Calendar integration and all serverless functions locally **without using Netlify build credits!**
+
+See `LOCAL_DEVELOPMENT.md` for more details.
 
 ## 4) Build & Deploy
 ```bash
