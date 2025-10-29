@@ -30,7 +30,7 @@ export function Calendar({ session }: { session: Session | null }) {
 
   useEffect(() => {
     loadCalendarEvents()
-  }, [selectedDate])
+  }, [selectedDate, selectedCalendarIds])
 
   async function loadCalendarEvents() {
     if (!session) {
@@ -93,6 +93,13 @@ export function Calendar({ session }: { session: Session | null }) {
           const primary = list.find(c => c.primary)
           setSelectedCalendarIds([primary?.id || list[0].id])
         }
+      }
+
+      // Only fetch events if we have selected calendars
+      if (selectedCalendarIds.length === 0) {
+        setEvents([])
+        setLoading(false)
+        return
       }
 
       const resp = await fetch('/.netlify/functions/calendar-events', {
@@ -236,35 +243,80 @@ export function Calendar({ session }: { session: Session | null }) {
     <div>
       <h2>📅 Calendar</h2>
       
-      {/* Controls: Week navigation + calendar selection */}
+      {/* Controls: Week navigation */}
       <div className="card" style={{ marginBottom: 16 }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <div className="row" style={{ gap: 8 }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
             <button className="filter-btn" onClick={() => setSelectedDate(d => subWeeks(d, 1))}>← Prev</button>
-            <div className="tag">Week of {format(weekStart, 'MMM d, yyyy')}</div>
+            <div className="tag" style={{ background: 'var(--bg-secondary)', padding: '8px 12px' }}>
+              Week of {format(weekStart, 'MMM d, yyyy')}
+            </div>
             <button className="filter-btn" onClick={() => setSelectedDate(d => addWeeks(d, 1))}>Next →</button>
             <button className="filter-btn" onClick={() => setSelectedDate(new Date())}>Today</button>
           </div>
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        </div>
+      </div>
+
+      {/* Calendar Selection */}
+      {calendars.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: '16px' }}>Select Calendars</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
             {calendars.map(c => {
               const checked = selectedCalendarIds.includes(c.id)
+              const displayName = c.summary || c.id.split('@')[0] || c.id
               return (
-                <label key={c.id} className="tag" style={{ cursor: 'pointer' }}>
+                <label 
+                  key={c.id} 
+                  style={{ 
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: `2px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
+                    background: checked ? 'var(--bg-secondary)' : 'transparent',
+                    transition: 'all 0.2s ease',
+                    userSelect: 'none'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!checked) e.currentTarget.style.borderColor = 'var(--border-light)'
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!checked) e.currentTarget.style.borderColor = 'var(--border)'
+                  }}
+                >
                   <input 
                     type="checkbox" 
                     checked={checked} 
                     onChange={(e) => {
-                      setSelectedCalendarIds(prev => e.target.checked ? [...new Set([...prev, c.id])] : prev.filter(id => id !== c.id))
+                      const newIds = e.target.checked 
+                        ? [...new Set([...selectedCalendarIds, c.id])]
+                        : selectedCalendarIds.filter(id => id !== c.id)
+                      if (newIds.length === 0) {
+                        // Prevent deselecting all calendars
+                        return
+                      }
+                      setSelectedCalendarIds(newIds)
                     }}
-                    style={{ marginRight: 8 }}
+                    style={{ 
+                      margin: 0,
+                      width: '16px',
+                      height: '16px',
+                      cursor: 'pointer'
+                    }}
                   />
-                  {c.summary || c.id}{c.primary ? ' (primary)' : ''}
+                  <span style={{ fontSize: '14px', fontWeight: checked ? 600 : 400 }}>
+                    {displayName}
+                    {c.primary && <span style={{ marginLeft: 4, opacity: 0.7 }}>(primary)</span>}
+                  </span>
                 </label>
               )
             })}
           </div>
         </div>
-      </div>
+      )}
 
       {/* Week view */}
       <div className="grid grid-3" style={{ gap: 20 }}>
@@ -277,22 +329,45 @@ export function Calendar({ session }: { session: Session | null }) {
           })
           const isTodayFlag = isToday(day)
           return (
-            <div key={key} className="card" style={{ borderColor: isTodayFlag ? 'var(--accent)' : 'var(--border)' }}>
-              <h3 style={{ margin: 0 }}>{format(day, 'EEE, MMM d')}{isTodayFlag ? ' (Today)' : ''}</h3>
-              <div style={{ marginTop: 12 }}>
+            <div 
+              key={key} 
+              className="card" 
+              style={{ 
+                borderLeft: `4px solid ${isTodayFlag ? 'var(--accent)' : 'var(--border)'}`,
+                minHeight: '150px'
+              }}
+            >
+              <h3 style={{ margin: '0 0 12px', fontSize: '16px', color: isTodayFlag ? 'var(--accent)' : 'var(--ink)' }}>
+                {format(day, 'EEE, MMM d')}
+                {isTodayFlag && <span style={{ marginLeft: 8, fontSize: '12px', fontWeight: 500 }}>(Today)</span>}
+              </h3>
+              <div style={{ marginTop: 8 }}>
                 {dayEvents.length === 0 && (
-                  <div className="small" style={{ color: 'var(--muted)' }}>No events</div>
+                  <div className="small" style={{ color: 'var(--muted)', fontStyle: 'italic', padding: '8px 0' }}>
+                    No events
+                  </div>
                 )}
                 {dayEvents.map(ev => (
-                  <div key={ev.id} className="item" style={{ marginBottom: 8 }}>
+                  <div 
+                    key={ev.id} 
+                    className="item" 
+                    style={{ 
+                      marginBottom: 8, 
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border)'
+                    }}
+                  >
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600 }}>{ev.summary}</div>
-                      <div className="small">
+                      <div style={{ fontWeight: 600, marginBottom: 4, fontSize: '14px' }}>{ev.summary}</div>
+                      <div className="small" style={{ color: 'var(--ink-secondary)', fontSize: '12px' }}>
                         {getEventTimeRange(ev)}
-                        {ev.location ? ` • ${ev.location}` : ''}
+                        {ev.location && (
+                          <span style={{ marginLeft: 8 }}>📍 {ev.location}</span>
+                        )}
                       </div>
                     </div>
-                    <span className="tag" style={{ fontSize: '10px' }}>{ev.calendarId}</span>
                   </div>
                 ))}
               </div>
