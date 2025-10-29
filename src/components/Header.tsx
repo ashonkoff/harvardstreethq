@@ -4,17 +4,24 @@ import { SignIn } from './SignIn'
 
 export function Header({ session }: { session: Session | null }) {
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div className="row" style={{ justifyContent: 'space-between' }}>
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1>Family HQ</h1>
+          <h1>Harvard Street Hub</h1>
           <div className="small">Secure home for notes • tasks • subscriptions • calendar</div>
         </div>
         <div>
           {session ? (
-            <div className="row">
-              <span className="tag">{session.user.email}</span>
-              <button onClick={() => supabase.auth.signOut()}>Sign out</button>
+            <div className="row" style={{ gap: 12 }}>
+              <span className="tag" style={{ background: 'var(--bg-secondary)', color: 'var(--ink-secondary)' }}>
+                {session.user.email}
+              </span>
+              <button 
+                onClick={() => supabase.auth.signOut()}
+                style={{ fontSize: '12px', padding: '8px 16px' }}
+              >
+                Sign out
+              </button>
             </div>
           ) : (
             <SignIn />
