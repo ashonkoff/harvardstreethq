@@ -24,7 +24,7 @@ export default function App() {
       case 'dashboard':
         return <Dashboard />
       case 'tasks':
-        return <Tasks />
+        return <Tasks session={session} />
       case 'notes':
         return <Notes />
       case 'subscriptions':

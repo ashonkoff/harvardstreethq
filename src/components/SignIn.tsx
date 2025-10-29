@@ -5,7 +5,7 @@ export function SignIn() {
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        scopes: 'https://www.googleapis.com/auth/calendar.readonly',
+        scopes: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks',
         redirectTo: window.location.origin,
         queryParams: { 
           access_type: 'offline', 
