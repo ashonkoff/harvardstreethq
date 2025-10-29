@@ -50,8 +50,16 @@ export function Calendar({ session }: { session: Session | null }) {
       const { data } = await supabase.auth.getSession()
       const providerToken = data.session?.provider_token
       const accessToken = data.session?.access_token
+      
+      console.log('Session debug:', {
+        hasProviderToken: !!providerToken,
+        providerTokenLength: providerToken?.length,
+        hasAccessToken: !!accessToken,
+        sessionKeys: data.session ? Object.keys(data.session) : []
+      })
+      
       if (!providerToken) {
-        setError('Google access not granted. Please sign out and sign in again.')
+        setError('Google access token not found. Please sign out and sign in again to grant calendar permissions.')
         setLoading(false)
         return
       }

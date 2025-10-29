@@ -7,7 +7,12 @@ export function SignIn() {
       options: {
         scopes: 'https://www.googleapis.com/auth/calendar.readonly',
         redirectTo: window.location.origin,
-        queryParams: { access_type: 'offline', prompt: 'consent select_account' },
+        queryParams: { 
+          access_type: 'offline', 
+          prompt: 'consent select_account',
+          // Request that provider_token is returned
+          skipHTTPRedirect: false
+        },
       },
     })
   }
