@@ -238,48 +238,52 @@ label {
   }
 }
 
-/* Navigation tabs */
-.nav-tab {
-  padding: 8px 14px;
+/* Sidebar Navigation */
+.nav-sidebar-item {
+  width: 100%;
+  padding: 10px 12px;
   border-radius: 10px;
   font-weight: 600;
   font-size: 13px;
-  transition: none;
+  text-align: left;
+  transition: all 0.2s ease;
   background: transparent;
   color: var(--ink-secondary);
   border: 1px solid transparent;
+  cursor: pointer;
+  margin-bottom: 2px;
 }
 
-.nav-tab:hover {
-  background: transparent;
-  color: var(--ink-secondary);
+.nav-sidebar-item:hover {
+  background: var(--bg-secondary);
+  color: var(--ink);
 }
 
-.nav-tab.active {
+.nav-sidebar-item.active {
   background: var(--accent);
   color: white;
   box-shadow: var(--shadow);
 }
 
-.nav-tab.active:hover {
+.nav-sidebar-item.active:hover {
   background: var(--accent);
 }
 
-/* Dashboard primary tab */
-.nav-tab-dashboard {
-  background: transparent; /* distinct inactive look */
+/* Dashboard primary sidebar item */
+.nav-sidebar-dashboard {
+  background: transparent;
   color: var(--accent-light);
   font-weight: 700;
   border: 1px solid var(--accent);
   box-shadow: var(--shadow);
 }
 
-.nav-tab-dashboard:hover {
+.nav-sidebar-dashboard:hover {
   background: transparent;
   color: var(--accent-light);
 }
 
-.nav-tab-dashboard.active {
+.nav-sidebar-dashboard.active {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
   color: white;
   border-color: var(--accent);
@@ -501,5 +505,16 @@ label {
   
   .card {
     padding: 20px;
+  }
+  
+  /* Stack sidebar on mobile */
+  .app-layout {
+    flex-direction: column !important;
+  }
+  
+  .sidebar-nav {
+    width: 100% !important;
+    position: relative !important;
+    margin-bottom: 16px;
   }
 }
