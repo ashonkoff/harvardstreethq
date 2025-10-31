@@ -9,10 +9,14 @@ import { Tasks } from './components/Tasks'
 import { Subscriptions } from './components/Subscriptions'
 import { Calendar } from './components/Calendar'
 import { MealPlan } from './components/MealPlan'
+import { Sports } from './components/Sports'
+import { School } from './components/School'
+import { House } from './components/House'
+import { Car } from './components/Car'
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notes' | 'subscriptions' | 'calendar' | 'mealplan'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notes' | 'subscriptions' | 'calendar' | 'mealplan' | 'sports' | 'school' | 'house' | 'car'>('dashboard')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
@@ -34,8 +38,16 @@ export default function App() {
               return <Calendar session={session} />
       case 'mealplan':
         return <MealPlan />
+      case 'sports':
+        return <Sports />
+      case 'school':
+        return <School />
+      case 'house':
+        return <House />
+      case 'car':
+        return <Car />
       default:
-        return <Dashboard />
+        return <Dashboard session={session} onNavigate={(tab) => setActiveTab(tab as any)} />
     }
   }
 
@@ -43,56 +55,84 @@ export default function App() {
     <div className="container">
       <Header session={session} />
       <RequireAuth session={session}>
-        {/* Navigation Tabs */}
-        <div className="card compact" style={{ marginBottom: 8, paddingTop: 8, paddingBottom: 8 }}>
-          <div className="row" style={{ gap: 6 }}>
-            <button 
-              onClick={() => setActiveTab('dashboard')}
-              className={`nav-tab nav-tab-dashboard ${activeTab === 'dashboard' ? 'active' : ''}`}
-            >
-              🏠 Dashboard
-            </button>
-            <button 
-              onClick={() => setActiveTab('calendar')}
-              className={`nav-tab ${activeTab === 'calendar' ? 'active' : ''}`}
-            >
-              📅 Calendar
-            </button>
-            <button 
-              onClick={() => setActiveTab('tasks')}
-              className={`nav-tab ${activeTab === 'tasks' ? 'active' : ''}`}
-            >
-              📋 To do
-            </button>
-            <button 
-              onClick={() => setActiveTab('mealplan')}
-              className={`nav-tab ${activeTab === 'mealplan' ? 'active' : ''}`}
-            >
-              🍽️ Meal Plan
-            </button>
-            <button 
-              onClick={() => setActiveTab('notes')}
-              className={`nav-tab ${activeTab === 'notes' ? 'active' : ''}`}
-            >
-              📝 Notes
-            </button>
-            <button 
-              onClick={() => setActiveTab('subscriptions')}
-              className={`nav-tab ${activeTab === 'subscriptions' ? 'active' : ''}`}
-            >
-              💳 Subscriptions
-            </button>
+        <div className="app-layout" style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+          {/* Left Sidebar Navigation */}
+          <div className="sidebar-nav card" style={{ width: 220, padding: 12, position: 'sticky', top: 0, flexShrink: 0 }}>
+            <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <button 
+                onClick={() => setActiveTab('dashboard')}
+                className={`nav-sidebar-item nav-sidebar-dashboard ${activeTab === 'dashboard' ? 'active' : ''}`}
+              >
+                🏠 Dashboard
+              </button>
+              <button 
+                onClick={() => setActiveTab('calendar')}
+                className={`nav-sidebar-item ${activeTab === 'calendar' ? 'active' : ''}`}
+              >
+                📅 Calendar
+              </button>
+              <button 
+                onClick={() => setActiveTab('tasks')}
+                className={`nav-sidebar-item ${activeTab === 'tasks' ? 'active' : ''}`}
+              >
+                ✅ To do
+              </button>
+              <button 
+                onClick={() => setActiveTab('mealplan')}
+                className={`nav-sidebar-item ${activeTab === 'mealplan' ? 'active' : ''}`}
+              >
+                🍽️ Meal Plan
+              </button>
+              <button 
+                onClick={() => setActiveTab('notes')}
+                className={`nav-sidebar-item ${activeTab === 'notes' ? 'active' : ''}`}
+              >
+                📝 Notes
+              </button>
+              <button 
+                onClick={() => setActiveTab('sports')}
+                className={`nav-sidebar-item ${activeTab === 'sports' ? 'active' : ''}`}
+              >
+                🏃 Sports
+              </button>
+              <button 
+                onClick={() => setActiveTab('school')}
+                className={`nav-sidebar-item ${activeTab === 'school' ? 'active' : ''}`}
+              >
+                📚 School
+              </button>
+              <button 
+                onClick={() => setActiveTab('house')}
+                className={`nav-sidebar-item ${activeTab === 'house' ? 'active' : ''}`}
+              >
+                🏠 House
+              </button>
+              <button 
+                onClick={() => setActiveTab('car')}
+                className={`nav-sidebar-item ${activeTab === 'car' ? 'active' : ''}`}
+              >
+                🚗 Car
+              </button>
+              <button 
+                onClick={() => setActiveTab('subscriptions')}
+                className={`nav-sidebar-item ${activeTab === 'subscriptions' ? 'active' : ''}`}
+              >
+                💳 Subscriptions
+              </button>
+            </nav>
+          </div>
+
+          {/* Main Content */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {activeTab === 'dashboard' ? (
+              renderContent()
+            ) : (
+              <div className="card">
+                {renderContent()}
+              </div>
+            )}
           </div>
         </div>
-
-        {/* Main Content */}
-        {activeTab === 'dashboard' ? (
-          renderContent()
-        ) : (
-          <div className="card">
-            {renderContent()}
-          </div>
-        )}
       </RequireAuth>
     </div>
   )
