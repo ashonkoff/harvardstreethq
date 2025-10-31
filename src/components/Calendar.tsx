@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { format, startOfWeek, endOfWeek, isToday, isTomorrow, parseISO, addDays, addWeeks, subWeeks } from 'date-fns'
 import { Session } from '@supabase/supabase-js'
@@ -27,10 +27,39 @@ export function Calendar({ session }: { session: Session | null }) {
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [calendars, setCalendars] = useState<{ id: string, summary: string, primary?: boolean, backgroundColor?: string }[]>([])
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([])
+  const [showCalendarDropdown, setShowCalendarDropdown] = useState(false)
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false)
+  const isInitialLoadRef = useRef(true)
 
   useEffect(() => {
     loadCalendarEvents()
   }, [selectedDate, selectedCalendarIds])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!showCalendarDropdown) return
+    
+    function handleClickOutside(event: MouseEvent) {
+      const target = event.target as HTMLElement
+      if (!target.closest('.calendar-dropdown-container')) {
+        setShowCalendarDropdown(false)
+      }
+    }
+    
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showCalendarDropdown])
+
+  // Auto-save preferences when selectedCalendarIds changes (but only after preferences are loaded and not during initial load)
+  useEffect(() => {
+    if (preferencesLoaded && selectedCalendarIds.length > 0 && calendars.length > 0 && !isInitialLoadRef.current) {
+      // Use a small delay to batch rapid changes
+      const timeoutId = setTimeout(() => {
+        saveUserPreferences()
+      }, 500)
+      return () => clearTimeout(timeoutId)
+    }
+  }, [selectedCalendarIds, preferencesLoaded, calendars.length, session?.user?.id])
 
   async function loadCalendarEvents() {
     if (!session) {
@@ -90,7 +119,23 @@ export function Calendar({ session }: { session: Session | null }) {
         const listJson = await listResp.json()
         const list = (listJson.calendars || []) as { id: string, summary: string, primary?: boolean, backgroundColor?: string }[]
         setCalendars(list)
-        if (selectedCalendarIds.length === 0 && list.length > 0) {
+        
+        // Load user preferences if not already loaded
+        if (!preferencesLoaded && list.length > 0) {
+          const preferencesWereLoaded = await loadUserPreferences(list)
+          
+          // Only set default if no preferences were loaded
+          if (!preferencesWereLoaded && selectedCalendarIds.length === 0) {
+            const family = list.find(c => (c.summary || '').toLowerCase() === 'family calendar')
+            const primary = list.find(c => c.primary)
+            setSelectedCalendarIds([family?.id || primary?.id || list[0].id])
+            // Mark initial load as complete after setting default
+            setTimeout(() => {
+              isInitialLoadRef.current = false
+            }, 100)
+          }
+        } else if (selectedCalendarIds.length === 0 && list.length > 0) {
+          // Fallback: set default if calendars are loaded but none selected (shouldn't happen normally)
           const family = list.find(c => (c.summary || '').toLowerCase() === 'family calendar')
           const primary = list.find(c => c.primary)
           setSelectedCalendarIds([family?.id || primary?.id || list[0].id])
@@ -278,93 +323,258 @@ export function Calendar({ session }: { session: Session | null }) {
     )
   }
 
+  function selectAllCalendars() {
+    setSelectedCalendarIds(calendars.map(c => c.id))
+  }
+
+  function selectNoneCalendars() {
+    // Can't have zero, so select just the first one
+    if (calendars.length > 0) {
+      setSelectedCalendarIds([calendars[0].id])
+    }
+  }
+
+  async function loadUserPreferences(availableCalendars: { id: string, summary: string, primary?: boolean, backgroundColor?: string }[]) {
+    if (!session?.user) return false
+    
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('default_calendar_ids')
+        .eq('user_id', session.user.id)
+        .single()
+      
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        console.error('Error loading user preferences:', error)
+        setPreferencesLoaded(true)
+        return false
+      }
+      
+      if (data?.default_calendar_ids && Array.isArray(data.default_calendar_ids) && data.default_calendar_ids.length > 0) {
+        // Filter to only include calendars that still exist
+        const availableIds = new Set(availableCalendars.map(c => c.id))
+        const validIds = data.default_calendar_ids.filter((id: string) => availableIds.has(id))
+        
+        if (validIds.length > 0) {
+          setSelectedCalendarIds(validIds)
+          setPreferencesLoaded(true)
+          isInitialLoadRef.current = false // Mark that initial load is complete after state updates
+          return true // Indicates preferences were loaded
+        }
+      }
+      
+      // No valid preferences found, mark as loaded so we don't try again
+      setPreferencesLoaded(true)
+      isInitialLoadRef.current = false
+      return false // No preferences loaded
+    } catch (err) {
+      console.error('Error loading user preferences:', err)
+      setPreferencesLoaded(true) // Mark as loaded even on error to prevent infinite retries
+      isInitialLoadRef.current = false
+      return false
+    }
+  }
+
+  async function saveUserPreferences() {
+    if (!session?.user || !preferencesLoaded) return
+    
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ default_calendar_ids: selectedCalendarIds })
+        .eq('user_id', session.user.id)
+      
+      if (error) {
+        console.error('Error saving user preferences:', error)
+      }
+    } catch (err) {
+      console.error('Error saving user preferences:', err)
+    }
+  }
+
+  function toggleCalendar(calendarId: string) {
+    const newIds = selectedCalendarIds.includes(calendarId)
+      ? selectedCalendarIds.filter(id => id !== calendarId)
+      : [...new Set([...selectedCalendarIds, calendarId])]
+    
+    // Prevent deselecting all calendars - if trying to deselect the last one, keep it selected
+    if (newIds.length === 0 && selectedCalendarIds.length > 0) {
+      return
+    }
+    
+    setSelectedCalendarIds(newIds)
+  }
+
   return (
     <div>
       <h2>📅 Calendar</h2>
-      <div className="row" style={{ alignItems: 'flex-start' }}>
-        {/* Sidebar: Calendar selection */}
-        {calendars.length > 0 && (
-          <div className="card" style={{ width: 260, padding: 16, position: 'sticky', top: 0, alignSelf: 'flex-start' }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: '14px', opacity: 0.9 }}>Calendars</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {calendars.map(c => {
-                const checked = selectedCalendarIds.includes(c.id)
-                const displayName = c.summary || c.id.split('@')[0] || c.id
-                return (
-                  <label 
-                    key={c.id}
-                    style={{ 
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '6px 8px',
-                      borderRadius: '8px',
-                      border: `1px solid ${checked ? (c.backgroundColor || 'var(--accent)') : 'var(--border)'}`,
-                      background: checked ? 'var(--bg-secondary)' : 'transparent',
-                      transition: 'all 0.2s ease',
-                      userSelect: 'none'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!checked) e.currentTarget.style.borderColor = 'var(--border-light)'
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!checked) e.currentTarget.style.borderColor = 'var(--border)'
-                    }}
-                  >
-                    <input 
-                      type="checkbox" 
-                      checked={checked} 
-                      onChange={(e) => {
-                        const newIds = e.target.checked 
-                          ? [...new Set([...selectedCalendarIds, c.id])]
-                          : selectedCalendarIds.filter(id => id !== c.id)
-                        if (newIds.length === 0) {
-                          // Prevent deselecting all calendars
-                          return
-                        }
-                        setSelectedCalendarIds(newIds)
-                      }}
-                      style={{ 
-                        margin: 0,
-                        width: '14px',
-                        height: '14px',
-                        cursor: 'pointer'
-                      }}
-                    />
-                    <span style={{ fontSize: '12px', fontWeight: checked ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }} title={displayName}>
-                      {displayName}
-                      {c.primary && <span style={{ marginLeft: 4, opacity: 0.7 }}>(primary)</span>}
-                    </span>
-                    {/* color dot */}
-                    {c.backgroundColor && (
-                      <span style={{ width: 10, height: 10, borderRadius: 9999, background: c.backgroundColor, border: '1px solid var(--border)' }} />
-                    )}
-                  </label>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
+      <div style={{ position: 'relative' }}>
         {/* Main content */}
-        <div style={{ flex: 1 }}>
-          {/* Controls: Week navigation */}
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                <button className="filter-btn" onClick={() => {
-                  const newDate = new Date(selectedDate)
-                  newDate.setDate(newDate.getDate() - 7)
-                  setSelectedDate(newDate)
-                }}>← Prev</button>
-                <div className="tag" style={{ background: 'var(--bg-secondary)', padding: '8px 12px' }}>
-                  {weekDays.length > 0 && format(weekDays[0], 'MMM d')} - {weekDays.length > 0 && format(weekDays[weekDays.length - 1], 'MMM d, yyyy')}
-                </div>
-                <button className="filter-btn" onClick={() => setSelectedDate(d => addDays(d, 7))}>Next →</button>
-                <button className="filter-btn" onClick={() => setSelectedDate(new Date())}>Today</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Simple navigation links above calendar */}
+          <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', position: 'relative' }}>
+            <button 
+              onClick={() => {
+                const newDate = new Date(selectedDate)
+                newDate.setDate(newDate.getDate() - 7)
+                setSelectedDate(newDate)
+              }}
+              style={{ 
+                background: 'transparent', 
+                border: 'none', 
+                color: 'var(--accent)', 
+                cursor: 'pointer', 
+                fontSize: '13px',
+                padding: '4px 8px',
+                textDecoration: 'underline'
+              }}
+            >
+              ← Prev
+            </button>
+            <span style={{ fontSize: '13px', color: 'var(--ink-secondary)' }}>
+              {weekDays.length > 0 && format(weekDays[0], 'MMM d')} - {weekDays.length > 0 && format(weekDays[weekDays.length - 1], 'MMM d, yyyy')}
+            </span>
+            <button 
+              onClick={() => setSelectedDate(d => addDays(d, 7))}
+              style={{ 
+                background: 'transparent', 
+                border: 'none', 
+                color: 'var(--accent)', 
+                cursor: 'pointer', 
+                fontSize: '13px',
+                padding: '4px 8px',
+                textDecoration: 'underline'
+              }}
+            >
+              Next →
+            </button>
+            <button 
+              onClick={() => setSelectedDate(new Date())}
+              style={{ 
+                background: 'transparent', 
+                border: 'none', 
+                color: 'var(--accent)', 
+                cursor: 'pointer', 
+                fontSize: '13px',
+                padding: '4px 8px',
+                textDecoration: 'underline'
+              }}
+            >
+              Today
+            </button>
+            
+            {/* Calendar dropdown */}
+            {calendars.length > 0 && (
+              <div className="calendar-dropdown-container" style={{ position: 'relative', display: 'inline-block' }}>
+                <button 
+                  onClick={() => setShowCalendarDropdown(!showCalendarDropdown)}
+                  style={{ 
+                    background: 'transparent', 
+                    border: 'none', 
+                    color: 'var(--accent)', 
+                    cursor: 'pointer', 
+                    fontSize: '13px',
+                    padding: '4px 8px',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  Calendars ▼
+                </button>
+                
+                {showCalendarDropdown && (
+                  <div className="card" style={{ 
+                    position: 'absolute', 
+                    top: '100%', 
+                    right: 0,
+                    marginTop: 8,
+                    zIndex: 1000,
+                    width: 220,
+                    padding: 12,
+                    maxHeight: '400px',
+                    overflowY: 'auto'
+                  }}>
+                    <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
+                      <button 
+                        onClick={selectAllCalendars}
+                        style={{ 
+                          background: 'transparent', 
+                          border: 'none', 
+                          color: 'var(--accent)', 
+                          cursor: 'pointer', 
+                          fontSize: '12px',
+                          padding: '4px 8px',
+                          marginRight: 8
+                        }}
+                      >
+                        All
+                      </button>
+                      <button 
+                        onClick={selectNoneCalendars}
+                        style={{ 
+                          background: 'transparent', 
+                          border: 'none', 
+                          color: 'var(--accent)', 
+                          cursor: 'pointer', 
+                          fontSize: '12px',
+                          padding: '4px 8px'
+                        }}
+                      >
+                        None
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {calendars.map(c => {
+                        const checked = selectedCalendarIds.includes(c.id)
+                        const displayName = c.summary || c.id.split('@')[0] || c.id
+                        return (
+                          <label 
+                            key={c.id}
+                            style={{ 
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              padding: '6px 8px',
+                              borderRadius: '8px',
+                              border: `1px solid ${checked ? (c.backgroundColor || 'var(--accent)') : 'var(--border)'}`,
+                              background: checked ? 'var(--bg-secondary)' : 'transparent',
+                              transition: 'all 0.2s ease',
+                              userSelect: 'none'
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!checked) e.currentTarget.style.borderColor = 'var(--border-light)'
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!checked) e.currentTarget.style.borderColor = 'var(--border)'
+                            }}
+                          >
+                            <input 
+                              type="checkbox" 
+                              checked={checked} 
+                              onChange={() => toggleCalendar(c.id)}
+                              style={{ 
+                                margin: 0,
+                                width: '14px',
+                                height: '14px',
+                                cursor: 'pointer',
+                                flexShrink: 0
+                              }}
+                            />
+                            <span style={{ fontSize: '12px', fontWeight: checked ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }} title={displayName}>
+                              {displayName}
+                              {c.primary && <span style={{ marginLeft: 4, opacity: 0.7, fontSize: '11px' }}>(primary)</span>}
+                            </span>
+                            {c.backgroundColor && (
+                              <span style={{ width: 10, height: 10, borderRadius: 9999, background: c.backgroundColor, border: '1px solid var(--border)', flexShrink: 0 }} />
+                            )}
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
           </div>
 
           {/* Week view */}
@@ -420,7 +630,7 @@ export function Calendar({ session }: { session: Session | null }) {
                             padding: '10px 12px',
                             borderRadius: '8px',
                             background: special ? 'linear-gradient(135deg, rgba(255, 196, 0, 0.16) 0%, rgba(255, 196, 0, 0.08) 100%)' : 'var(--bg-secondary)',
-                            border: special ? '1px solid var(--border)' : '1px solid var(--border)',
+                            border: '1px solid var(--border)',
                             borderLeft: `4px solid ${calColor}`
                           }}
                         >

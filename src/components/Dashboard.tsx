@@ -352,7 +352,7 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
 
   return (
     <div>
-      <div className="surface" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.1fr', gap: 16, marginLeft: 'auto', marginRight: 'auto', width: '100%' }}>
+      <div className="surface" style={{ display: 'grid', gridTemplateColumns: '1.5fr 0.9fr', gap: 16, width: '100%', maxWidth: '100%', overflow: 'hidden' }}>
         {/* Left column: Calendar (3-day) + Meal Plan (Mon–Fri single row) */}
         <div style={{ display: 'grid', gap: 12 }}>
           <div className="card" style={{ padding: 16 }}>
@@ -363,7 +363,7 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
             {calError ? (
               <div className="small" style={{ color: 'var(--danger)' }}>{calError}</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 230px)', gap: 8, overflowX: 'auto' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, overflowX: 'auto' }}>
                 {threeDays.map(day => {
                   const key = format(day, 'yyyy-MM-dd')
                   const dayEvents = (eventsByDay[key] || []).sort((a, b) => {
@@ -373,7 +373,7 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
                   })
                   const todayFlag = isToday(day)
                   return (
-                    <div key={key} style={{ width: 230, border: 1 + 'px solid var(--border)', borderRadius: 12, padding: 10, background: 'var(--bg-secondary)' }}>
+                    <div key={key} style={{ minWidth: 0, border: 1 + 'px solid var(--border)', borderRadius: 12, padding: 10, background: 'var(--bg-secondary)' }}>
                       <div style={{ fontWeight: 700, color: todayFlag ? 'var(--accent)' : 'var(--ink)', marginBottom: 4 }}>
                         {format(day, 'EEE, MMM d')}{todayFlag ? ' (Today)' : ''}
           </div>
@@ -403,20 +403,20 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
             {mealError ? (
               <div className="small" style={{ color: 'var(--danger)' }}>{mealError}</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8, minWidth: 0 }}>
                 {Array.from({ length: 5 }).map((_, i) => {
                   const d = addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), i)
                   const key = format(d, 'yyyy-MM-dd')
                   const items = mealEvents[key] || []
                   return (
-                    <div key={key} style={{ border: 1 + 'px solid var(--border)', borderRadius: 12, padding: 10, background: 'var(--bg-secondary)' }}>
+                    <div key={key} style={{ border: 1 + 'px solid var(--border)', borderRadius: 12, padding: 10, background: 'var(--bg-secondary)', minWidth: 0 }}>
                       <div style={{ fontWeight: 700 }}>{format(d, 'EEE')}</div>
                       <div style={{ marginTop: 6 }}>
                         {items.length === 0 && (
                           <div className="small" style={{ color: 'var(--muted)', fontStyle: 'italic' }}>No meals</div>
                         )}
                         {items.slice(0, 2).map((m, idx) => (
-                          <div key={idx} className="small" style={{ marginBottom: 4, color: 'var(--ink)' }}>
+                          <div key={idx} className="small" style={{ marginBottom: 4, color: 'var(--ink)', wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                             <span style={{ opacity: 0.95, color: 'var(--ink)' }}>{m.type}:</span> {m.name}
               </div>
             ))}

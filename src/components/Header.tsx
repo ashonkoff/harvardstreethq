@@ -1,6 +1,5 @@
 import { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
-import { SignIn } from './SignIn'
 
 export function Header({ session }: { session: Session | null }) {
   return (
@@ -10,7 +9,7 @@ export function Header({ session }: { session: Session | null }) {
           <h1>Harvard Street Hub</h1>
         </div>
         <div>
-          {session ? (
+          {session && (
             <div className="row" style={{ gap: 12 }}>
               <span className="tag" style={{ background: 'var(--bg-secondary)', color: 'var(--ink-secondary)' }}>
                 {session.user.email}
@@ -22,8 +21,6 @@ export function Header({ session }: { session: Session | null }) {
                 Sign out
               </button>
             </div>
-          ) : (
-            <SignIn />
           )}
         </div>
       </div>

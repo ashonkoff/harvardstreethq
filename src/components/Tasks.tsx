@@ -341,18 +341,6 @@ export function Tasks({ session }: { session: Session | null }) {
   return (
     <div>
       <h2>✅ To do</h2>
-      
-      {/* Task Stats */}
-      <div className="row" style={{ marginBottom: 16, gap: 12 }}>
-        <div className="status-badge status-todo">
-          <span className="status-count">{activeTasks.length}</span>
-          <span className="status-label">Active</span>
-        </div>
-        <div className="status-badge status-done">
-          <span className="status-count">{completedTasks.length}</span>
-          <span className="status-label">Completed</span>
-        </div>
-      </div>
 
       {/* Task List Selection */}
       {taskLists.length > 1 && (
