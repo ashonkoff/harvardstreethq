@@ -9,10 +9,12 @@ import { Tasks } from './components/Tasks'
 import { Subscriptions } from './components/Subscriptions'
 import { Calendar } from './components/Calendar'
 import { MealPlan } from './components/MealPlan'
+import { Sports } from './components/Sports'
+import { School } from './components/School'
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notes' | 'subscriptions' | 'calendar' | 'mealplan'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notes' | 'subscriptions' | 'calendar' | 'mealplan' | 'sports' | 'school'>('dashboard')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
@@ -34,6 +36,10 @@ export default function App() {
               return <Calendar session={session} />
       case 'mealplan':
         return <MealPlan />
+      case 'sports':
+        return <Sports />
+      case 'school':
+        return <School />
       default:
         return <Dashboard />
     }
@@ -62,7 +68,7 @@ export default function App() {
               onClick={() => setActiveTab('tasks')}
               className={`nav-tab ${activeTab === 'tasks' ? 'active' : ''}`}
             >
-              📋 To do
+              ✅ To do
             </button>
             <button 
               onClick={() => setActiveTab('mealplan')}
@@ -81,6 +87,18 @@ export default function App() {
               className={`nav-tab ${activeTab === 'subscriptions' ? 'active' : ''}`}
             >
               💳 Subscriptions
+            </button>
+            <button 
+              onClick={() => setActiveTab('sports')}
+              className={`nav-tab ${activeTab === 'sports' ? 'active' : ''}`}
+            >
+              🏃 Sports
+            </button>
+            <button 
+              onClick={() => setActiveTab('school')}
+              className={`nav-tab ${activeTab === 'school' ? 'active' : ''}`}
+            >
+              📚 School
             </button>
           </div>
         </div>

@@ -340,7 +340,7 @@ export function Tasks({ session }: { session: Session | null }) {
 
   return (
     <div>
-      <h2>📋 To do</h2>
+      <h2>✅ To do</h2>
       
       {/* Task Stats */}
       <div className="row" style={{ marginBottom: 16, gap: 12 }}>
