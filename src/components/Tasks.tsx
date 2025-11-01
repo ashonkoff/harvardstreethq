@@ -3,6 +3,12 @@ import { supabase } from '../lib/supabase'
 import { format, isAfter, isBefore, isToday, isTomorrow, parseISO } from 'date-fns'
 import { Session } from '@supabase/supabase-js'
 
+export interface GoogleTaskLink {
+  type?: string
+  link?: string
+  description?: string
+}
+
 export interface GoogleTask {
   id: string
   title: string
@@ -13,6 +19,7 @@ export interface GoogleTask {
   updated: string
   position: string
   taskListId: string
+  links?: GoogleTaskLink[]
 }
 
 export function Tasks({ session }: { session: Session | null }) {
@@ -25,6 +32,10 @@ export function Tasks({ session }: { session: Session | null }) {
   const [error, setError] = useState<string | null>(null)
   const [isAdding, setIsAdding] = useState(false)
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all')
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editDueDate, setEditDueDate] = useState('')
+  const [isUpdating, setIsUpdating] = useState(false)
 
   async function loadTaskLists() {
     if (!session) return
@@ -243,6 +254,64 @@ export function Tasks({ session }: { session: Session | null }) {
     }
   }
 
+  async function updateTask(task: GoogleTask, updates: { title?: string; due?: string }) {
+    if (!session) return
+
+    setIsUpdating(true)
+    try {
+      const { data } = await supabase.auth.getSession()
+      const providerToken = data.session?.provider_token
+      const accessToken = data.session?.access_token
+      
+      if (!providerToken) return
+
+      const taskData: any = {}
+      if (updates.title !== undefined) taskData.title = updates.title
+      if (updates.due !== undefined) taskData.due = updates.due || null
+
+      const resp = await fetch('/.netlify/functions/google-tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          action: 'updateTask',
+          googleAccessToken: providerToken,
+          taskListId: task.taskListId,
+          taskId: task.id,
+          taskData,
+        }),
+      })
+
+      if (!resp.ok) {
+        throw new Error('Failed to update task')
+      }
+
+      await loadTasks()
+      setEditingTaskId(null)
+      setEditTitle('')
+      setEditDueDate('')
+    } catch (err) {
+      console.error('Update task error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to update task')
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
+  function startEdit(task: GoogleTask) {
+    setEditingTaskId(task.id)
+    setEditTitle(task.title)
+    setEditDueDate(task.due ? format(parseISO(task.due), 'yyyy-MM-dd') : '')
+  }
+
+  function cancelEdit() {
+    setEditingTaskId(null)
+    setEditTitle('')
+    setEditDueDate('')
+  }
+
   async function remove(task: GoogleTask) {
     if (!session) return
 
@@ -282,6 +351,18 @@ export function Tasks({ session }: { session: Session | null }) {
     return status === 'completed' ? '✅' : '⭕'
   }
 
+  function getGmailLink(task: GoogleTask): string | null {
+    if (!task.links || task.links.length === 0) return null
+    
+    // Look for email type links or Gmail URLs
+    const emailLink = task.links.find(link => 
+      link.type === 'email' || 
+      (link.link && link.link.includes('mail.google.com'))
+    )
+    
+    return emailLink?.link || null
+  }
+
   function getDueDateStatus(due?: string) {
     if (!due) return { text: '', urgent: false, overdue: false }
     
@@ -312,7 +393,7 @@ export function Tasks({ session }: { session: Session | null }) {
   if (loading && tasks.length === 0) {
     return (
       <div>
-        <h2>To do</h2>
+        <h2>Tasks</h2>
         <div className="card">
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--muted)' }}>
             Loading tasks...
@@ -325,7 +406,7 @@ export function Tasks({ session }: { session: Session | null }) {
   if (error && tasks.length === 0) {
     return (
       <div>
-        <h2>To do</h2>
+        <h2>Tasks</h2>
         <div className="card">
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--danger)' }}>
             <div style={{ marginBottom: 16 }}>⚠️ {error}</div>
@@ -340,87 +421,103 @@ export function Tasks({ session }: { session: Session | null }) {
 
   return (
     <div>
-      <h2>✅ To do</h2>
-      
-      {/* Task Stats */}
-      <div className="row" style={{ marginBottom: 16, gap: 12 }}>
-        <div className="status-badge status-todo">
-          <span className="status-count">{activeTasks.length}</span>
-          <span className="status-label">Active</span>
-        </div>
-        <div className="status-badge status-done">
-          <span className="status-count">{completedTasks.length}</span>
-          <span className="status-label">Completed</span>
-        </div>
-      </div>
-
-      {/* Task List Selection */}
-      {taskLists.length > 1 && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <label style={{ marginBottom: 8, display: 'block', fontSize: '14px', fontWeight: 500 }}>
-            Task List:
-          </label>
+      {/* Compact Header */}
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        {/* Task List Selection */}
+        {taskLists.length > 1 && (
           <select
             value={selectedTaskListId}
             onChange={(e) => setSelectedTaskListId(e.target.value)}
-            style={{ width: '100%', maxWidth: '300px' }}
+            style={{ 
+              fontSize: '13px',
+              padding: '4px 8px',
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--accent)',
+              textDecoration: 'underline',
+              cursor: 'pointer',
+              outline: 'none'
+            }}
           >
             {taskLists.map(list => (
               <option key={list.id} value={list.id}>{list.title}</option>
             ))}
           </select>
-        </div>
-      )}
-
-      {/* Add Task Form */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="row" style={{ marginBottom: 12 }}>
-          <input
-            placeholder="New task…"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && !isAdding && title.trim() && add()}
-            style={{ flex: 1 }}
-          />
-          <input
-            type="date"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-            style={{ width: 140 }}
-          />
-          <button 
-            onClick={add} 
-            disabled={isAdding || !title.trim()}
-            style={{ 
-              background: isAdding ? '#666' : 'var(--accent)',
-              opacity: isAdding ? 0.7 : 1,
-              cursor: isAdding ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {isAdding ? 'Adding...' : 'Add'}
-          </button>
-        </div>
-      </div>
-
-      {/* Filter Buttons */}
-      <div className="row" style={{ marginBottom: 16, gap: 8 }}>
+        )}
+        
+        {/* Filter Buttons */}
         <button 
           onClick={() => setFilter('all')}
-          className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
+          style={{ 
+            background: filter === 'all' ? 'var(--accent)' : 'transparent',
+            color: filter === 'all' ? 'white' : 'var(--accent)',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '13px',
+            padding: '4px 8px',
+            textDecoration: filter === 'all' ? 'none' : 'underline',
+            borderRadius: filter === 'all' ? '4px' : '0'
+          }}
         >
           All ({tasks.length})
         </button>
         <button 
           onClick={() => setFilter('active')}
-          className={`filter-btn ${filter === 'active' ? 'active' : ''}`}
+          style={{ 
+            background: filter === 'active' ? 'var(--accent)' : 'transparent',
+            color: filter === 'active' ? 'white' : 'var(--accent)',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '13px',
+            padding: '4px 8px',
+            textDecoration: filter === 'active' ? 'none' : 'underline',
+            borderRadius: filter === 'active' ? '4px' : '0'
+          }}
         >
           Active ({activeTasks.length})
         </button>
         <button 
           onClick={() => setFilter('completed')}
-          className={`filter-btn ${filter === 'completed' ? 'active' : ''}`}
+          style={{ 
+            background: filter === 'completed' ? 'var(--accent)' : 'transparent',
+            color: filter === 'completed' ? 'white' : 'var(--accent)',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '13px',
+            padding: '4px 8px',
+            textDecoration: filter === 'completed' ? 'none' : 'underline',
+            borderRadius: filter === 'completed' ? '4px' : '0'
+          }}
         >
           Completed ({completedTasks.length})
+        </button>
+      </div>
+
+      {/* Compact Add Task Form */}
+      <div style={{ marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          placeholder="New task…"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && !isAdding && title.trim() && add()}
+          style={{ flex: 1, minWidth: '200px', maxWidth: '400px' }}
+        />
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          style={{ width: 140, fontSize: '13px' }}
+        />
+        <button 
+          onClick={add} 
+          disabled={isAdding || !title.trim()}
+          className="filter-btn"
+          style={{ 
+            opacity: isAdding || !title.trim() ? 0.5 : 1,
+            cursor: isAdding || !title.trim() ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {isAdding ? 'Adding...' : 'Add'}
         </button>
       </div>
 
@@ -428,6 +525,9 @@ export function Tasks({ session }: { session: Session | null }) {
       <div className="grid" style={{ gap: 8 }}>
         {filteredTasks.map((task) => {
           const dueDateStatus = getDueDateStatus(task.due)
+          const isEditing = editingTaskId === task.id
+          const gmailLink = getGmailLink(task)
+          
           return (
             <div 
               className="item" 
@@ -438,56 +538,150 @@ export function Tasks({ session }: { session: Session | null }) {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
-                <button
-                  onClick={() => toggleComplete(task)}
+                <input
+                  type="checkbox"
+                  checked={task.status === 'completed'}
+                  onChange={() => toggleComplete(task)}
+                  disabled={isEditing}
                   style={{ 
-                    background: 'none', 
-                    border: 'none', 
-                    fontSize: '18px',
-                    padding: 0,
-                    cursor: 'pointer'
+                    width: 18,
+                    height: 18,
+                    cursor: isEditing ? 'not-allowed' : 'pointer',
+                    flexShrink: 0
                   }}
-                >
-                  {getStatusIcon(task.status)}
-                </button>
+                />
                 
-                <div style={{ flex: 1 }}>
-                  <div style={{ 
-                    fontWeight: task.status === 'completed' ? 400 : 600,
-                    textDecoration: task.status === 'completed' ? 'line-through' : 'none'
-                  }}>
-                    {task.title}
-                  </div>
-                  
-                  {task.notes && (
-                    <div className="small" style={{ marginTop: 4, color: 'var(--muted)' }}>
-                      {task.notes}
-                    </div>
-                  )}
-                  
-                  <div className="row" style={{ gap: 8, marginTop: 4 }}>
-                    {dueDateStatus.text && (
-                      <span 
-                        className="tag" 
-                        style={{ 
-                          background: dueDateStatus.overdue ? '#ff6b6b' : 
-                                     dueDateStatus.urgent ? '#ffc857' : '#26304e',
-                          color: dueDateStatus.overdue ? 'white' : '#c7d3ff'
-                        }}
+                {isEditing ? (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && !isUpdating && editTitle.trim()) {
+                          updateTask(task, { title: editTitle.trim() })
+                        }
+                        if (e.key === 'Escape') cancelEdit()
+                      }}
+                      style={{ flex: 1 }}
+                      autoFocus
+                    />
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <input
+                        type="date"
+                        value={editDueDate}
+                        onChange={(e) => setEditDueDate(e.target.value)}
+                        style={{ fontSize: '13px', width: 140 }}
+                      />
+                      <button
+                        onClick={() => updateTask(task, { 
+                          title: editTitle.trim(),
+                          due: editDueDate || undefined
+                        })}
+                        disabled={isUpdating || !editTitle.trim()}
+                        className="filter-btn"
+                        style={{ fontSize: '12px', padding: '4px 8px' }}
                       >
-                        {dueDateStatus.text}
-                      </span>
-                    )}
+                        Save
+                      </button>
+                      <button
+                        onClick={cancelEdit}
+                        className="filter-btn"
+                        style={{ fontSize: '12px', padding: '4px 8px', background: 'var(--bg-secondary)' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div style={{ flex: 1 }}>
+                    <div style={{ 
+                      fontWeight: task.status === 'completed' ? 400 : 600,
+                      textDecoration: task.status === 'completed' ? 'line-through' : 'none'
+                    }}>
+                      {task.title}
+                    </div>
+                    
+                    {task.notes && (
+                      <div className="small" style={{ marginTop: 4, color: 'var(--muted)' }}>
+                        {task.notes}
+                      </div>
+                    )}
+                    
+                    <div className="row" style={{ gap: 8, marginTop: 4, alignItems: 'center' }}>
+                      {gmailLink && (
+                        <a
+                          href={gmailLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            fontSize: '13px',
+                            textDecoration: 'none',
+                            color: 'var(--accent)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            cursor: 'pointer',
+                            gap: 4
+                          }}
+                        >
+                          Go to email →
+                        </a>
+                      )}
+                      {dueDateStatus.text && (
+                        <span 
+                          className="tag" 
+                          style={{ 
+                            background: dueDateStatus.overdue ? '#ff6b6b' : 
+                                       dueDateStatus.urgent ? '#ffc857' : '#26304e',
+                            color: dueDateStatus.overdue ? 'white' : '#c7d3ff'
+                          }}
+                        >
+                          {dueDateStatus.text}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
               
-              <button 
-                onClick={() => remove(task)}
-                className="delete-btn"
-              >
-                Delete
-              </button>
+              {!isEditing && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button 
+                    onClick={() => startEdit(task)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      fontSize: '16px',
+                      color: 'var(--ink-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="Edit task"
+                  >
+                    ✏️
+                  </button>
+                  <button 
+                    onClick={() => remove(task)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      fontSize: '16px',
+                      color: 'var(--danger)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="Delete task"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              )}
             </div>
           )
         })}

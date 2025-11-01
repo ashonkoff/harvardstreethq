@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { format, addDays, startOfWeek, endOfWeek, isToday, parseISO } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import type { Session } from '@supabase/supabase-js'
 import type { Note } from '../types'
 
 // Reuse keys/flows used elsewhere
 const MEAL_PLAN_FEED_KEY = 'harvard-street-meal-plan-feed-url'
+
+type GoogleTaskLink = {
+  type?: string
+  link?: string
+  description?: string
+}
 
 type GoogleTask = {
   id: string
@@ -14,6 +20,7 @@ type GoogleTask = {
   status: 'completed' | 'needsAction'
   due?: string
   taskListId: string
+  links?: GoogleTaskLink[]
 }
 
 type CalendarSummaryEvent = {
@@ -44,11 +51,11 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
   const [isAddingNote, setIsAddingNote] = useState(false)
   const [showAddNote, setShowAddNote] = useState(false)
 
-  // Compact calendar (3-day) — Family calendar preferred
+  // Calendar (today only) — Family calendar preferred
   const [calEvents, setCalEvents] = useState<CalendarSummaryEvent[]>([])
   const [calError, setCalError] = useState<string | null>(null)
 
-  // Meal plan (Mon–Fri row)
+  // Meal plan (today only)
   const [mealEvents, setMealEvents] = useState<Record<string, { type: string; name: string }[]>>({})
   const [mealError, setMealError] = useState<string | null>(null)
 
@@ -122,6 +129,7 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
         status: t.status,
         due: t.due,
         taskListId: '@default',
+        links: t.links || [],
       }))
       const active = all.filter(t => t.status === 'needsAction')
       const completed = all.filter(t => t.status === 'completed')
@@ -212,7 +220,7 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
     }
   }
 
-  // ---- Calendar (3-day, Family pref) ----
+  // ---- Calendar (today only, Family pref) ----
   async function loadCompactCalendar() {
     try {
       if (!session) return
@@ -236,16 +244,18 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
       const selectedId = family?.id || calendars.find(c => c.primary)?.id || calendars[0]?.id
       if (!selectedId) { setCalEvents([]); return }
 
-      const now = new Date()
-      const end = addDays(now, 3)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const tomorrow = new Date(today)
+      tomorrow.setDate(tomorrow.getDate() + 1)
       const eventsResp = await fetch('/.netlify/functions/calendar-events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
         body: JSON.stringify({
           action: 'listEvents',
           googleAccessToken: providerToken,
-          timeMin: now.toISOString(),
-          timeMax: end.toISOString(),
+          timeMin: today.toISOString(),
+          timeMax: tomorrow.toISOString(),
           calendarIds: [selectedId],
         })
       })
@@ -303,17 +313,19 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
     }
   }
 
-  // ---- Meal Plan (Mon–Fri row) ----
+  // ---- Meal Plan (today only) ----
   async function loadMealPlanRow() {
     try {
       const feedUrl = localStorage.getItem(MEAL_PLAN_FEED_KEY) || ''
       if (!feedUrl) return
-      const start = startOfWeek(new Date(), { weekStartsOn: 1 })
-      const end = endOfWeek(new Date(), { weekStartsOn: 1 })
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const tomorrow = new Date(today)
+      tomorrow.setDate(tomorrow.getDate() + 1)
       const resp = await fetch('/.netlify/functions/ical-feed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ feedUrl, timeMin: start.toISOString(), timeMax: end.toISOString() })
+        body: JSON.stringify({ feedUrl, timeMin: today.toISOString(), timeMax: tomorrow.toISOString() })
       })
       if (!resp.ok) throw new Error(await resp.text())
       const json = await resp.json()
@@ -339,104 +351,107 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
     return { type: 'Meal', name: summary || 'Untitled', description }
   }
 
-  const threeDays = useMemo(() => {
-    const days: Date[] = []
-    const start = new Date()
-    for (let i = 0; i < 3; i++) days.push(addDays(start, i))
-    return days
-  }, [])
-
   function taskIcon(status: GoogleTask['status']) {
     return status === 'completed' ? '✅' : '⭕'
   }
 
+  const today = new Date()
+  const todayKey = format(today, 'yyyy-MM-dd')
+  const todayEvents = (eventsByDay[todayKey] || []).sort((a, b) => {
+    const as = a.start.dateTime || a.start.date || ''
+    const bs = b.start.dateTime || b.start.date || ''
+    return as.localeCompare(bs)
+  })
+  const todayMeals = mealEvents[todayKey] || []
+
   return (
     <div>
-      <div className="surface" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.1fr', gap: 16, marginLeft: 'auto', marginRight: 'auto', width: '100%' }}>
-        {/* Left column: Calendar (3-day) + Meal Plan (Mon–Fri single row) */}
-        <div style={{ display: 'grid', gap: 12 }}>
-          <div className="card" style={{ padding: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <h3 style={{ margin: 0, fontSize: 16 }}>📅 Next 3 Days</h3>
+      <div className="surface" style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 20, width: '100%', maxWidth: '100%', overflow: 'hidden' }}>
+        {/* Left column: Calendar (today) + Meal Plan (today) */}
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div className="card" style={{ padding: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>📅 Today</h3>
               <button className="filter-btn" onClick={() => onNavigate('calendar')}>See full calendar →</button>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent)', marginBottom: 16 }}>
+                {format(today, 'EEEE, MMMM d, yyyy')}
+              </div>
             </div>
             {calError ? (
               <div className="small" style={{ color: 'var(--danger)' }}>{calError}</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 230px)', gap: 8, overflowX: 'auto' }}>
-                {threeDays.map(day => {
-                  const key = format(day, 'yyyy-MM-dd')
-                  const dayEvents = (eventsByDay[key] || []).sort((a, b) => {
-                    const as = a.start.dateTime || a.start.date || ''
-                    const bs = b.start.dateTime || b.start.date || ''
-                    return as.localeCompare(bs)
-                  })
-                  const todayFlag = isToday(day)
-                  return (
-                    <div key={key} style={{ width: 230, border: 1 + 'px solid var(--border)', borderRadius: 12, padding: 10, background: 'var(--bg-secondary)' }}>
-                      <div style={{ fontWeight: 700, color: todayFlag ? 'var(--accent)' : 'var(--ink)', marginBottom: 4 }}>
-                        {format(day, 'EEE, MMM d')}{todayFlag ? ' (Today)' : ''}
-          </div>
-                      <div>
-                        {dayEvents.length === 0 && (
-                          <div className="small" style={{ color: 'var(--muted)', fontStyle: 'italic' }}>No events</div>
+              <div style={{ display: 'grid', gap: 12 }}>
+                {todayEvents.length === 0 && (
+                  <div style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 16, padding: '20px 0' }}>No events today</div>
+                )}
+                {todayEvents.map(ev => (
+                  <div key={ev.id} style={{
+                    ...eventChipStyle(ev),
+                    padding: '14px 16px',
+                    fontSize: 15,
+                    marginBottom: 0,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                      <div style={{ minWidth: 100, fontWeight: 600, color: 'var(--ink)', opacity: 0.9 }}>
+                        {formatCompactTime(ev)}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 500, color: 'var(--ink)', marginBottom: ev.location ? 4 : 0 }}>
+                          {ev.summary}
+                        </div>
+                        {ev.location && (
+                          <div className="small" style={{ color: 'var(--muted)', marginTop: 4 }}>📍 {ev.location}</div>
                         )}
-                        {dayEvents.map(ev => (
-                          <div key={ev.id} style={eventChipStyle(ev)}>
-                            <span className="small" style={{ opacity: 0.98, color: 'var(--ink)', marginRight: 6 }}>{formatCompactTime(ev)}</span>
-                            <span className="small" style={{ opacity: 1, color: 'var(--ink)' }}>{ev.summary}</span>
-        </div>
-                        ))}
-          </div>
-        </div>
-                  )
-                })}
-          </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
           
-          <div className="card" style={{ padding: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <h3 style={{ margin: 0, fontSize: 16 }}>🍽️ Meal Plan (Mon–Fri)</h3>
+          <div className="card" style={{ padding: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>🍽️ Today's Meals</h3>
               <button className="filter-btn" onClick={() => onNavigate('mealplan')}>Open meal plan →</button>
-          </div>
+            </div>
             {mealError ? (
               <div className="small" style={{ color: 'var(--danger)' }}>{mealError}</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
-                {Array.from({ length: 5 }).map((_, i) => {
-                  const d = addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), i)
-                  const key = format(d, 'yyyy-MM-dd')
-                  const items = mealEvents[key] || []
-                  return (
-                    <div key={key} style={{ border: 1 + 'px solid var(--border)', borderRadius: 12, padding: 10, background: 'var(--bg-secondary)' }}>
-                      <div style={{ fontWeight: 700 }}>{format(d, 'EEE')}</div>
-                      <div style={{ marginTop: 6 }}>
-                        {items.length === 0 && (
-                          <div className="small" style={{ color: 'var(--muted)', fontStyle: 'italic' }}>No meals</div>
-                        )}
-                        {items.slice(0, 2).map((m, idx) => (
-                          <div key={idx} className="small" style={{ marginBottom: 4, color: 'var(--ink)' }}>
-                            <span style={{ opacity: 0.95, color: 'var(--ink)' }}>{m.type}:</span> {m.name}
-              </div>
-            ))}
-                      </div>
+              <div style={{ display: 'grid', gap: 16 }}>
+                {todayMeals.length === 0 && (
+                  <div style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 16, padding: '20px 0' }}>No meals planned for today</div>
+                )}
+                {todayMeals.map((m, idx) => (
+                  <div key={idx} style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: 12,
+                    padding: 16,
+                    background: 'var(--bg-secondary)',
+                  }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      {m.type}
                     </div>
-                  )
-                })}
+                    <div style={{ fontSize: 18, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.4 }}>
+                      {m.name}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
         </div>
 
-        {/* Right column: To do (Google Tasks) + Notes */}
+        {/* Right column: Tasks (Google Tasks) + Notes */}
         <div style={{ display: 'grid', gap: 12, alignSelf: 'start' }}>
           <div className="card" style={{ padding: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <h3 style={{ margin: 0, fontSize: 16 }}>📋 To do</h3>
+              <h3 style={{ margin: 0, fontSize: 16 }}>📋 Tasks</h3>
               <div className="row" style={{ gap: 8 }}>
                 <button className="filter-btn" onClick={() => setShowAddTask(s => !s)}>{showAddTask ? '×' : '＋'}</button>
-                <button className="filter-btn" onClick={() => onNavigate('tasks')}>Open To do →</button>
+                <button className="filter-btn" onClick={() => onNavigate('tasks')}>Open Tasks →</button>
               </div>
           </div>
             {tasksError ? (

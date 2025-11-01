@@ -13,10 +13,11 @@ import { Sports } from './components/Sports'
 import { School } from './components/School'
 import { House } from './components/House'
 import { Car } from './components/Car'
+import { Health } from './components/Health'
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notes' | 'subscriptions' | 'calendar' | 'mealplan' | 'sports' | 'school' | 'house' | 'car'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'notes' | 'subscriptions' | 'calendar' | 'mealplan' | 'sports' | 'school' | 'house' | 'car' | 'health'>('dashboard')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
@@ -46,6 +47,8 @@ export default function App() {
         return <House />
       case 'car':
         return <Car />
+      case 'health':
+        return <Health />
       default:
         return <Dashboard session={session} onNavigate={(tab) => setActiveTab(tab as any)} />
     }
@@ -75,7 +78,7 @@ export default function App() {
                 onClick={() => setActiveTab('tasks')}
                 className={`nav-sidebar-item ${activeTab === 'tasks' ? 'active' : ''}`}
               >
-                ✅ To do
+                ✅ Tasks
               </button>
               <button 
                 onClick={() => setActiveTab('mealplan')}
@@ -112,6 +115,12 @@ export default function App() {
                 className={`nav-sidebar-item ${activeTab === 'car' ? 'active' : ''}`}
               >
                 🚗 Car
+              </button>
+              <button 
+                onClick={() => setActiveTab('health')}
+                className={`nav-sidebar-item ${activeTab === 'health' ? 'active' : ''}`}
+              >
+                🩺 Health
               </button>
               <button 
                 onClick={() => setActiveTab('subscriptions')}
