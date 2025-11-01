@@ -166,6 +166,7 @@ export const handler = async (event, context) => {
         updated: task.updated,
         position: task.position,
         taskListId: listId,
+        links: task.links || [],
       }))
 
       return {

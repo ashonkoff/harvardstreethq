@@ -78,7 +78,7 @@ export default function App() {
                 onClick={() => setActiveTab('tasks')}
                 className={`nav-sidebar-item ${activeTab === 'tasks' ? 'active' : ''}`}
               >
-                ✅ To do
+                ✅ Tasks
               </button>
               <button 
                 onClick={() => setActiveTab('mealplan')}

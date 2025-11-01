@@ -53,8 +53,8 @@ export function MealPlan() {
     setError(null)
 
     try {
-      const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 }) // Sunday
-      const weekEnd = endOfWeek(selectedDate, { weekStartsOn: 0 }) // Saturday
+      const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 }) // Monday
+      const weekEnd = addDays(startOfWeek(selectedDate, { weekStartsOn: 1 }), 4) // Friday
 
       // In local dev with netlify dev, functions run on same port (8888)
       const isNetlifyDev = window.location.port === '8888' || window.location.hostname === 'localhost'
@@ -107,6 +107,25 @@ export function MealPlan() {
     loadMealEvents(feedUrl.trim())
   }
 
+  function handleEditFeedUrl() {
+    // Show setup screen but keep the current URL
+    setIsSettingUp(true)
+    setError(null)
+  }
+
+  function handleBack() {
+    // Restore the saved URL if it exists
+    const saved = localStorage.getItem(MEAL_PLAN_FEED_KEY)
+    if (saved) {
+      setFeedUrl(saved)
+      setIsSettingUp(false)
+      loadMealEvents(saved)
+    } else {
+      setIsSettingUp(true)
+    }
+    setError(null)
+  }
+
   function handleClearFeedUrl() {
     localStorage.removeItem(MEAL_PLAN_FEED_KEY)
     setFeedUrl('')
@@ -135,11 +154,11 @@ export function MealPlan() {
     return acc
   }, {} as Record<string, MealEvent[]>)
 
-  // Get the current week's days (Sunday to Saturday)
+  // Get the current week's days (Monday to Friday)
   const weekDays = []
-  const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 })
+  const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 }) // Monday
   
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 5; i++) {
     weekDays.push(addDays(weekStart, i))
   }
 
@@ -151,18 +170,25 @@ export function MealPlan() {
     // Try to extract meal type (Breakfast, Lunch, Dinner) and meal name
     const mealMatch = summary.match(/(Breakfast|Lunch|Dinner|Brunch|Snack):?\s*(.+)/i)
     if (mealMatch) {
+      const extractedName = mealMatch[2].trim()
+      // Only include description if it's different from the summary and contains additional info
+      const hasAdditionalDescription = description && 
+        description.trim() !== summary.trim() && 
+        description.trim().toLowerCase() !== extractedName.toLowerCase()
+      
       return {
         type: mealMatch[1],
-        name: mealMatch[2].trim(),
-        description: description || summary,
+        name: extractedName,
+        description: hasAdditionalDescription ? description : null,
       }
     }
     
     // If no meal type found, assume it's the meal name
+    const hasAdditionalDescription = description && description.trim() !== summary.trim()
     return {
       type: 'Meal',
       name: summary || 'Untitled',
-      description: description,
+      description: hasAdditionalDescription ? description : null,
     }
   }
 
@@ -194,14 +220,25 @@ export function MealPlan() {
             <div className="small" style={{ marginBottom: 12, color: 'var(--muted)' }}>
               <strong>How to find it:</strong> In AnyList, go to Settings → Meal Plan → Export → Copy the iCalendar feed URL
             </div>
-            <button 
-              onClick={handleSaveFeedUrl}
-              disabled={!feedUrl.trim()}
-              className="filter-btn"
-              style={{ width: '100%' }}
-            >
-              Save & Load Meal Plan
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button 
+                onClick={handleSaveFeedUrl}
+                disabled={!feedUrl.trim()}
+                className="filter-btn"
+                style={{ flex: 1 }}
+              >
+                Save & Load Meal Plan
+              </button>
+              {localStorage.getItem(MEAL_PLAN_FEED_KEY) && (
+                <button 
+                  onClick={handleBack}
+                  className="filter-btn"
+                  style={{ background: 'var(--bg-secondary)', color: 'var(--ink)' }}
+                >
+                  Back
+                </button>
+              )}
+            </div>
           </div>
 
           {error && (
@@ -251,55 +288,64 @@ export function MealPlan() {
       <h2>🍽️ Meal Plan</h2>
       
       {/* Week Navigation */}
-      <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%)' }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <button 
-              className="filter-btn" 
-              onClick={() => {
-                const prevWeek = new Date(selectedDate)
-                prevWeek.setDate(prevWeek.getDate() - 7)
-                setSelectedDate(prevWeek)
-              }}
-              style={{ background: 'white', color: 'var(--accent)' }}
-            >
-              ← Prev Week
-            </button>
-            <div className="tag" style={{ background: 'white', color: 'var(--accent)', padding: '8px 16px', fontWeight: 600 }}>
-              Week of {format(weekStart, 'MMM d, yyyy')}
-            </div>
-            <button 
-              className="filter-btn" 
-              onClick={() => {
-                const nextWeek = new Date(selectedDate)
-                nextWeek.setDate(nextWeek.getDate() + 7)
-                setSelectedDate(nextWeek)
-              }}
-              style={{ background: 'white', color: 'var(--accent)' }}
-            >
-              Next Week →
-            </button>
-            <button 
-              className="filter-btn" 
-              onClick={() => setSelectedDate(new Date())}
-              style={{ background: 'white', color: 'var(--accent)' }}
-            >
-              This Week
-            </button>
-          </div>
-          
-          <button 
-            onClick={handleClearFeedUrl}
-            className="filter-btn"
-            style={{ background: 'rgba(255,255,255,0.2)', color: 'white' }}
-          >
-            Change Feed URL
-          </button>
-        </div>
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', position: 'relative' }}>
+        <button 
+          onClick={() => {
+            const prevWeek = new Date(selectedDate)
+            prevWeek.setDate(prevWeek.getDate() - 7)
+            setSelectedDate(prevWeek)
+          }}
+          style={{ 
+            background: 'transparent', 
+            border: 'none', 
+            color: 'var(--accent)', 
+            cursor: 'pointer', 
+            fontSize: '13px',
+            padding: '4px 8px',
+            textDecoration: 'underline'
+          }}
+        >
+          ← Prev
+        </button>
+        <span style={{ fontSize: '13px', color: 'var(--ink-secondary)' }}>
+          {weekDays.length > 0 && format(weekDays[0], 'MMM d')} - {weekDays.length > 0 && format(weekDays[weekDays.length - 1], 'MMM d, yyyy')}
+        </span>
+        <button 
+          onClick={() => {
+            const nextWeek = new Date(selectedDate)
+            nextWeek.setDate(nextWeek.getDate() + 7)
+            setSelectedDate(nextWeek)
+          }}
+          style={{ 
+            background: 'transparent', 
+            border: 'none', 
+            color: 'var(--accent)', 
+            cursor: 'pointer', 
+            fontSize: '13px',
+            padding: '4px 8px',
+            textDecoration: 'underline'
+          }}
+        >
+          Next →
+        </button>
+        <button 
+          onClick={() => setSelectedDate(new Date())}
+          style={{ 
+            background: 'transparent', 
+            border: 'none', 
+            color: 'var(--accent)', 
+            cursor: 'pointer', 
+            fontSize: '13px',
+            padding: '4px 8px',
+            textDecoration: 'underline'
+          }}
+        >
+          Today
+        </button>
       </div>
 
       {/* Week View */}
-      <div className="grid grid-3" style={{ gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
         {weekDays.map(day => {
           const key = format(day, 'yyyy-MM-dd')
           const dayMeals = (eventsByDay[key] || []).sort((a, b) => {
@@ -308,6 +354,11 @@ export function MealPlan() {
             return as.localeCompare(bs)
           })
           const isTodayFlag = isToday(day)
+          const dayStart = new Date(day)
+          dayStart.setHours(0, 0, 0, 0)
+          const now = new Date()
+          now.setHours(0, 0, 0, 0)
+          const isPastDay = dayStart < now && !isTodayFlag
           
           return (
             <div 
@@ -315,18 +366,21 @@ export function MealPlan() {
               className="card" 
               style={{ 
                 borderLeft: `4px solid ${isTodayFlag ? 'var(--accent)' : 'var(--border)'}`,
-                minHeight: '200px'
+                minHeight: '150px',
+                opacity: isPastDay ? 0.5 : 1,
+                filter: isPastDay ? 'grayscale(0.3)' : 'none',
+                transition: 'opacity 0.2s ease, filter 0.2s ease'
               }}
             >
-              <h3 style={{ margin: '0 0 12px', fontSize: '16px', color: isTodayFlag ? 'var(--accent)' : 'var(--ink)' }}>
+              <h3 style={{ margin: '0 0 8px', fontSize: '14px', color: isTodayFlag ? 'var(--accent)' : 'var(--ink)' }}>
                 {format(day, 'EEE, MMM d')}
-                {isTodayFlag && <span style={{ marginLeft: 8, fontSize: '12px', fontWeight: 500 }}>(Today)</span>}
+                {isTodayFlag && <span style={{ marginLeft: 6, fontSize: '11px', fontWeight: 500 }}>(Today)</span>}
               </h3>
               
-              <div style={{ marginTop: 8 }}>
+              <div style={{ marginTop: 6 }}>
                 {dayMeals.length === 0 && (
-                  <div className="small" style={{ color: 'var(--muted)', fontStyle: 'italic', padding: '16px 0', textAlign: 'center' }}>
-                    No meals planned
+                  <div className="small" style={{ color: 'var(--muted)', fontStyle: 'italic', padding: '8px 0', textAlign: 'center', fontSize: '11px' }}>
+                    No meals
                   </div>
                 )}
                 
@@ -345,9 +399,9 @@ export function MealPlan() {
                     <div 
                       key={meal.id}
                       style={{ 
-                        marginBottom: 12,
-                        padding: '14px',
-                        borderRadius: '10px',
+                        marginBottom: 8,
+                        padding: '10px',
+                        borderRadius: '8px',
                         background: `linear-gradient(135deg, ${mealColor}15 0%, ${mealColor}05 100%)`,
                         border: `2px solid ${mealColor}40`,
                         borderLeft: `4px solid ${mealColor}`
@@ -356,8 +410,8 @@ export function MealPlan() {
                       <div 
                         style={{ 
                           fontWeight: 700, 
-                          marginBottom: 6, 
-                          fontSize: '12px', 
+                          marginBottom: 4, 
+                          fontSize: '11px', 
                           color: mealColor,
                           textTransform: 'uppercase',
                           letterSpacing: '0.5px'
@@ -365,11 +419,11 @@ export function MealPlan() {
                       >
                         {parsed.type}
                       </div>
-                      <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)', marginBottom: 2, lineHeight: 1.3 }}>
                         {parsed.name}
                       </div>
-                      {parsed.description && parsed.description !== parsed.name && (
-                        <div className="small" style={{ marginTop: 6, color: 'var(--muted)', lineHeight: '1.4' }}>
+                      {parsed.description && (
+                        <div className="small" style={{ marginTop: 4, color: 'var(--muted)', lineHeight: '1.3', fontSize: '11px' }}>
                           {parsed.description}
                         </div>
                       )}
@@ -380,6 +434,24 @@ export function MealPlan() {
             </div>
           )
         })}
+      </div>
+
+      {/* Change Feed URL Button */}
+      <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-start' }}>
+        <button 
+          onClick={handleEditFeedUrl}
+          style={{ 
+            background: 'transparent', 
+            border: 'none', 
+            color: 'var(--accent)', 
+            cursor: 'pointer', 
+            fontSize: '13px',
+            padding: '4px 8px',
+            textDecoration: 'underline'
+          }}
+        >
+          Change calendar URL
+        </button>
       </div>
     </div>
   )

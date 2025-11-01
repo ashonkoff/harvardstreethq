@@ -76,75 +76,29 @@ export function Notes() {
 
   return (
     <div>
-      <h2>Notes</h2>
-      
-      {/* Search and Filter */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="row" style={{ marginBottom: 12 }}>
-          <input
-            placeholder="Search notes and tags…"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            style={{ width: 120 }}
-          >
-            <option value="all">All Categories</option>
-            {categories.map(cat => (
-              <option key={cat} value={cat}>
-                {cat} ({categoryCounts[cat] || 0})
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Add Note Form */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="row" style={{ marginBottom: 12 }}>
-          <input
-            placeholder="Add a note…"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          <input
-            placeholder="Tags (comma separated)"
-            value={tags}
-            onChange={(e) => setTags(e.target.value)}
-            style={{ width: 180 }}
-          />
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            style={{ width: 100 }}
-          >
-            {categories.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-          <button 
-            onClick={add} 
-            disabled={isAdding || !text.trim()}
-            style={{ 
-              background: isAdding ? '#666' : 'var(--accent)',
-              opacity: isAdding ? 0.7 : 1,
-              cursor: isAdding ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {isAdding ? 'Adding...' : 'Add'}
-          </button>
-        </div>
-      </div>
-
-      {/* Category Filter Buttons */}
-      <div className="row" style={{ marginBottom: 16, gap: 8, flexWrap: 'wrap' }}>
+      {/* Compact Header */}
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        {/* Search */}
+        <input
+          placeholder="Search notes and tags…"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={{ flex: 1, minWidth: '200px', maxWidth: '300px' }}
+        />
+        
+        {/* Category Filter Buttons */}
         <button 
           onClick={() => setSelectedCategory('all')}
-          className={`filter-btn ${selectedCategory === 'all' ? 'active' : ''}`}
+          style={{ 
+            background: selectedCategory === 'all' ? 'var(--accent)' : 'transparent',
+            color: selectedCategory === 'all' ? 'white' : 'var(--accent)',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '13px',
+            padding: '4px 8px',
+            textDecoration: selectedCategory === 'all' ? 'none' : 'underline',
+            borderRadius: selectedCategory === 'all' ? '4px' : '0'
+          }}
         >
           All ({notes.length})
         </button>
@@ -152,11 +106,58 @@ export function Notes() {
           <button 
             key={cat}
             onClick={() => setSelectedCategory(cat)}
-            className={`filter-btn ${selectedCategory === cat ? 'active' : ''}`}
+            style={{ 
+              background: selectedCategory === cat ? 'var(--accent)' : 'transparent',
+              color: selectedCategory === cat ? 'white' : 'var(--accent)',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '13px',
+              padding: '4px 8px',
+              textDecoration: selectedCategory === cat ? 'none' : 'underline',
+              borderRadius: selectedCategory === cat ? '4px' : '0',
+              textTransform: 'capitalize'
+            }}
           >
             {cat} ({categoryCounts[cat] || 0})
           </button>
         ))}
+      </div>
+
+      {/* Compact Add Note Form */}
+      <div style={{ marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          placeholder="Add a note…"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && !isAdding && text.trim() && add()}
+          style={{ flex: 1, minWidth: '200px', maxWidth: '400px' }}
+        />
+        <input
+          placeholder="Tags"
+          value={tags}
+          onChange={(e) => setTags(e.target.value)}
+          style={{ width: 140, fontSize: '13px' }}
+        />
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          style={{ width: 100, fontSize: '13px' }}
+        >
+          {categories.map(cat => (
+            <option key={cat} value={cat}>{cat}</option>
+          ))}
+        </select>
+        <button 
+          onClick={add} 
+          disabled={isAdding || !text.trim()}
+          className="filter-btn"
+          style={{ 
+            opacity: isAdding || !text.trim() ? 0.5 : 1,
+            cursor: isAdding || !text.trim() ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {isAdding ? 'Adding...' : 'Add'}
+        </button>
       </div>
 
       {/* Notes List */}
