@@ -36,6 +36,7 @@ export function Tasks({ session }: { session: Session | null }) {
   const [editTitle, setEditTitle] = useState('')
   const [editDueDate, setEditDueDate] = useState('')
   const [isUpdating, setIsUpdating] = useState(false)
+  const [hideCompleted, setHideCompleted] = useState(false)
 
   async function loadTaskLists() {
     if (!session) return
@@ -384,10 +385,26 @@ export function Tasks({ session }: { session: Session | null }) {
   const activeTasks = tasks.filter(t => t.status === 'needsAction')
   const completedTasks = tasks.filter(t => t.status === 'completed')
   
-  const filteredTasks = tasks.filter(task => {
+  // Filter tasks based on selected filter
+  let filteredTasks = tasks.filter(task => {
     if (filter === 'active') return task.status === 'needsAction'
     if (filter === 'completed') return task.status === 'completed'
     return true
+  })
+  
+  // If "hide completed" is enabled and showing all tasks, filter out completed tasks
+  if (filter === 'all' && hideCompleted) {
+    filteredTasks = filteredTasks.filter(task => task.status === 'needsAction')
+  }
+  
+  // Sort tasks: active tasks first, completed tasks at the bottom
+  filteredTasks.sort((a, b) => {
+    // If both are completed or both are active, maintain original order (by position)
+    if (a.status === b.status) {
+      return a.position.localeCompare(b.position)
+    }
+    // Active tasks come first
+    return a.status === 'completed' ? 1 : -1
   })
 
   if (loading && tasks.length === 0) {
@@ -491,6 +508,31 @@ export function Tasks({ session }: { session: Session | null }) {
         >
           Completed ({completedTasks.length})
         </button>
+        
+        {/* Hide Completed Toggle - only show when viewing all tasks */}
+        {filter === 'all' && (
+          <label style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 6, 
+            fontSize: '13px', 
+            color: 'var(--ink-secondary)',
+            cursor: 'pointer',
+            marginLeft: 'auto'
+          }}>
+            <input
+              type="checkbox"
+              checked={hideCompleted}
+              onChange={(e) => setHideCompleted(e.target.checked)}
+              style={{ 
+                width: 16,
+                height: 16,
+                cursor: 'pointer'
+              }}
+            />
+            Hide completed
+          </label>
+        )}
       </div>
 
       {/* Compact Add Task Form */}

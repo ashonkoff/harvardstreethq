@@ -132,8 +132,7 @@ export function Dashboard({ session, onNavigate }: DashboardProps) {
         links: t.links || [],
       }))
       const active = all.filter(t => t.status === 'needsAction')
-      const completed = all.filter(t => t.status === 'completed')
-      setTasks([...active, ...completed])
+      setTasks(active)
       setTasksError(null)
     } catch (err) {
       setTasksError(err instanceof Error ? err.message : 'Failed to load tasks')
