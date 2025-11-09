@@ -12,6 +12,8 @@ export function Subscriptions() {
   const [nextRenewal, setNextRenewal] = useState('')
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [isAdding, setIsAdding] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<Subscription | null>(null)
 
   const categories = ['entertainment', 'productivity', 'utilities', 'news', 'fitness', 'education', 'other']
 
@@ -27,34 +29,89 @@ export function Subscriptions() {
     load()
   }, [])
 
-  async function add() {
+  async function saveSubscription() {
     if (!name.trim()) return
     setIsAdding(true)
     
     try {
       const cents = Math.round((parseFloat(amount || '0') || 0) * 100)
       
-      // Create insert object with only fields that exist
-      const insertData: any = {
-        name,
-        amount_cents: cents,
-        cadence: 'monthly',
+      if (editing) {
+        const updateData: any = {
+          name,
+          amount_cents: cents,
+          cadence,
+          category,
+          next_renewal_date: nextRenewal || null,
+        }
+        
+        const { error } = await supabase
+          .from('subscriptions')
+          .update(updateData)
+          .eq('id', editing.id)
+        
+        if (error) {
+          console.error('Update error', error)
+          return
+        }
+      } else {
+        // Create insert object with only fields that exist
+        const insertData: any = {
+          name,
+          amount_cents: cents,
+          cadence,
+          category,
+          next_renewal_date: nextRenewal || null,
+        }
+        
+        const { error } = await supabase.from('subscriptions').insert(insertData)
+        if (error) {
+          console.error('Insert error', error)
+          return
+        }
       }
       
-      const { error } = await supabase.from('subscriptions').insert(insertData)
-      if (error) {
-        console.error('Insert error', error)
-        return
-      }
       setName('')
       setAmount('')
       setCadence('monthly')
       setCategory('entertainment')
       setNextRenewal('')
+      setEditing(null)
+      setShowForm(false)
       await load()
     } finally {
       setIsAdding(false)
     }
+  }
+
+  function openForm() {
+    setShowForm(true)
+    setEditing(null)
+    setName('')
+    setAmount('')
+    setCadence('monthly')
+    setCategory('entertainment')
+    setNextRenewal('')
+  }
+
+  function cancelEdit() {
+    setName('')
+    setAmount('')
+    setCadence('monthly')
+    setCategory('entertainment')
+    setNextRenewal('')
+    setEditing(null)
+    setShowForm(false)
+  }
+
+  function startEdit(sub: Subscription) {
+    setName(sub.name)
+    setAmount((sub.amount_cents / 100).toFixed(2))
+    setCadence(sub.cadence || 'monthly')
+    setCategory(sub.category || 'entertainment')
+    setNextRenewal(sub.next_renewal_date ? format(parseISO(sub.next_renewal_date), 'yyyy-MM-dd') : '')
+    setEditing(sub)
+    setShowForm(true)
   }
 
   async function toggleActive(id: string, isActive: boolean) {
@@ -126,80 +183,117 @@ export function Subscriptions() {
         </div>
       </div>
 
-      {/* Add Subscription Form */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="row" style={{ marginBottom: 12 }}>
-          <input
-            placeholder="Name (e.g., Netflix)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          <input
-            placeholder="Amount (e.g., 15.99)"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            style={{ width: 120 }}
-          />
-          <select
-            value={cadence}
-            onChange={(e) => setCadence(e.target.value as 'monthly' | 'yearly')}
-            style={{ width: 100 }}
-          >
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
-          </select>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            style={{ width: 120 }}
-          >
-            {categories.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-          <input
-            type="date"
-            placeholder="Next renewal"
-            value={nextRenewal}
-            onChange={(e) => setNextRenewal(e.target.value)}
-            style={{ width: 140 }}
-          />
+      {/* Filter Buttons */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div className="row" style={{ gap: 8 }}>
           <button 
-            onClick={add} 
-            disabled={isAdding || !name.trim()}
-            style={{ 
-              background: isAdding ? '#666' : 'var(--accent)',
-              opacity: isAdding ? 0.7 : 1,
-              cursor: isAdding ? 'not-allowed' : 'pointer'
-            }}
+            onClick={() => setFilter('all')}
+            className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
           >
-            {isAdding ? 'Adding...' : 'Add'}
+            All ({subs.length})
+          </button>
+          <button 
+            onClick={() => setFilter('active')}
+            className={`filter-btn ${filter === 'active' ? 'active' : ''}`}
+          >
+            Active ({activeSubs.length})
+          </button>
+          <button 
+            onClick={() => setFilter('inactive')}
+            className={`filter-btn ${filter === 'inactive' ? 'active' : ''}`}
+          >
+            Inactive ({subs.length - activeSubs.length})
           </button>
         </div>
+        <button 
+          className="filter-btn" 
+          onClick={openForm}
+          style={{ padding: '6px 12px', fontSize: 12 }}
+        >
+          + Add subscription
+        </button>
       </div>
 
-      {/* Filter Buttons */}
-      <div className="row" style={{ marginBottom: 16, gap: 8 }}>
-        <button 
-          onClick={() => setFilter('all')}
-          className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
-        >
-          All ({subs.length})
-        </button>
-        <button 
-          onClick={() => setFilter('active')}
-          className={`filter-btn ${filter === 'active' ? 'active' : ''}`}
-        >
-          Active ({activeSubs.length})
-        </button>
-        <button 
-          onClick={() => setFilter('inactive')}
-          className={`filter-btn ${filter === 'inactive' ? 'active' : ''}`}
-        >
-          Inactive ({subs.length - activeSubs.length})
-        </button>
-      </div>
+      {/* Add/Edit Form */}
+      {showForm && (
+        <div className="card" style={{ marginBottom: 16, padding: 12, background: 'var(--bg-secondary)' }}>
+          <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div>
+                <label style={{ fontSize: 11, marginBottom: 4 }}>Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Netflix"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  style={{ fontSize: 13, padding: '6px 8px' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, marginBottom: 4 }}>Amount *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="e.g., 15.99"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  style={{ fontSize: 13, padding: '6px 8px' }}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div>
+                <label style={{ fontSize: 11, marginBottom: 4 }}>Cadence</label>
+                <select
+                  value={cadence}
+                  onChange={(e) => setCadence(e.target.value as 'monthly' | 'yearly')}
+                  style={{ fontSize: 13, padding: '6px 8px', width: '100%' }}
+                >
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, marginBottom: 4 }}>Category</label>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  style={{ fontSize: 13, padding: '6px 8px', width: '100%' }}
+                >
+                  {categories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, marginBottom: 4 }}>Next Renewal Date</label>
+              <input
+                type="date"
+                value={nextRenewal}
+                onChange={(e) => setNextRenewal(e.target.value)}
+                style={{ fontSize: 13, padding: '6px 8px', width: '100%' }}
+              />
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button 
+              onClick={saveSubscription} 
+              disabled={isAdding || !name.trim()}
+              style={{ padding: '6px 12px', fontSize: 12 }}
+            >
+              {editing ? 'Update' : 'Add'} Subscription
+            </button>
+            <button 
+              className="filter-btn" 
+              onClick={cancelEdit}
+              style={{ padding: '6px 12px', fontSize: 12 }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Subscriptions List */}
       <div className="grid" style={{ gap: 8 }}>
@@ -243,16 +337,26 @@ export function Subscriptions() {
               
               <div className="row" style={{ gap: 8 }}>
                 <button
+                  className="filter-btn"
+                  onClick={() => startEdit(sub)}
+                  style={{ padding: '6px 10px', fontSize: 14, minWidth: 'auto', background: 'transparent', color: 'var(--ink-secondary)', border: 'none', boxShadow: 'none' }}
+                  title="Edit"
+                >
+                  ✏️
+                </button>
+                <button
                   onClick={() => toggleActive(sub.id, sub.is_active)}
                   className={`toggle-btn ${(sub.is_active !== false) ? 'deactivate' : 'activate'}`}
+                  style={{ padding: '6px 10px', fontSize: 12 }}
                 >
                   {(sub.is_active !== false) ? 'Deactivate' : 'Activate'}
                 </button>
                 <button 
                   onClick={() => remove(sub.id)}
                   className="delete-btn"
+                  style={{ padding: '6px 10px', fontSize: 12 }}
                 >
-                  Delete
+                  🗑️
                 </button>
               </div>
             </div>

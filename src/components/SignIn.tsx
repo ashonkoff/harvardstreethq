@@ -8,10 +8,9 @@ export function SignIn() {
         scopes: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks',
         redirectTo: window.location.origin,
         queryParams: { 
-          access_type: 'offline', 
-          prompt: 'consent select_account',
-          // Request that provider_token is returned
-          skipHTTPRedirect: false
+          access_type: 'offline',
+          // Only prompt for consent if needed (first time), otherwise auto-select account
+          prompt: 'select_account'
         },
       },
     })
